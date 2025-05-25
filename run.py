@@ -16,6 +16,7 @@ Hosts Monitor 启动脚本
 
 import os
 import sys
+import shutil
 import locale
 from pathlib import Path
 
@@ -56,6 +57,17 @@ except ImportError as e:
     sys.exit(1)
 
 if __name__ == '__main__':
+    # 首次运行时，将打包内嵌的 icon.ico 解压到当前工作目录
+    if getattr(sys, 'frozen', False):
+        _meipass = getattr(sys, '_MEIPASS', None)
+        if _meipass:
+            src_icon = os.path.join(_meipass, 'resources', 'icon.ico')
+            dst_icon = os.path.join(os.getcwd(), 'icon.ico')
+            try:
+                if os.path.isfile(src_icon) and not os.path.exists(dst_icon):
+                    shutil.copy(src_icon, dst_icon)
+            except Exception:
+                pass
     try:
         # 启动应用程序
         print("正在启动应用程序...")

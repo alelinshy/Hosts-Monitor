@@ -837,6 +837,16 @@ class HostsMonitorUI(QMainWindow):
         """初始化窗口基本属性和样式"""
         self.setWindowTitle("Hosts Monitor")
         self.setMinimumSize(1250, 950)
+        # 设置窗口图标，兼容开发和打包环境
+        if getattr(sys, 'frozen', False):
+            # PyInstaller 单文件模式下资源解包目录
+            icon_base = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+        else:
+            # 开发环境：项目根目录
+            icon_base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        icon_path = os.path.join(icon_base, 'resources', 'icon.ico')
+        if os.path.isfile(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
         
         # 应用全局样式表
         self.setStyleSheet(StyleManager.get_style_sheet())
@@ -1242,8 +1252,13 @@ class HostsMonitorUI(QMainWindow):
         """初始化系统托盘图标和菜单"""
         # 创建托盘图标
         self.tray_icon = QSystemTrayIcon(self)
-        # 加载图标资源
-        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # 加载图标资源，兼容开发和打包环境
+        if getattr(sys, 'frozen', False):
+            # PyInstaller 单文件模式下，资源解压路径
+            base_path = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+        else:
+            # 开发环境：项目根目录
+            base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         icon_file = os.path.join(base_path, 'resources', 'icon.ico')
         if os.path.exists(icon_file):
             self.tray_icon.setIcon(QIcon(icon_file))
@@ -1256,11 +1271,12 @@ class HostsMonitorUI(QMainWindow):
         restore_action.triggered.connect(self.showNormal)
         exit_action = QAction('退出', self)
         # 退出应用
-        # 退出应用
         exit_action.triggered.connect(QApplication.quit)
         menu.addAction(restore_action)
         menu.addAction(exit_action)
         self.tray_icon.setContextMenu(menu)
+        # 显示托盘图标
+        self.tray_icon.show()
         # 托盘图标激活事件
         self.tray_icon.activated.connect(self._on_tray_activated)
 
@@ -1293,14 +1309,15 @@ class HostsMonitorUI(QMainWindow):
         
         # 加载所有规则的映射
         rules = get_all_rules()
+        # 仅显示启用规则的映射
         for rule in rules:
+            if not rule.get('enabled', False):
+                continue
             rule_name = rule.get('name', '')
             entries = rule.get('entries', [])
-            
             for entry in entries:
                 ip = entry.get('ip', '')
                 domain = entry.get('domain', '')
-                
                 if ip and domain:
                     row = self.mappings_table.rowCount()
                     self.mappings_table.insertRow(row)

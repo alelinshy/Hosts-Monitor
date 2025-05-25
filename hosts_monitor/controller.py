@@ -442,7 +442,6 @@ class MainController(QObject):
         # 更新配置
         if update_setting('auto_start', enabled):
             logger.info(f"已{status}开机自启")
-            
             # 执行系统操作
             result = self.set_auto_start(enabled)
             if not result:
@@ -650,8 +649,8 @@ class MainController(QObject):
         try:
             # 确定图标路径：打包环境和开发环境下路径不同
             if getattr(sys, 'frozen', False):
-                # PyInstaller 环境
-                base_path = os.path.dirname(sys.executable)
+                # PyInstaller 打包环境: 资源位于临时解包路径 _MEIPASS
+                base_path = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
                 icon_path = os.path.join(base_path, 'resources', 'icon.ico')
             else:
                 # 开发环境
