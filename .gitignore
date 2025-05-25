@@ -1,0 +1,8 @@
+// filepath: e:\Software Plugin Project\Hosts Monitor\.gitignore
+# Python bytecode files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/

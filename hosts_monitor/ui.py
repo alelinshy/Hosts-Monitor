@@ -1,7 +1,7 @@
 import sys
 import os
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon, QFont, QColor, QFontDatabase
+from PyQt6.QtCore import Qt, QEvent, QTimer, QCoreApplication
+from PyQt6.QtGui import QIcon, QFont, QColor, QFontDatabase, QAction
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -22,7 +22,9 @@ from PyQt6.QtWidgets import (
     QHeaderView,
     QSizePolicy,
     QGraphicsDropShadowEffect,
-    QAbstractItemView
+    QAbstractItemView,
+    QSystemTrayIcon,
+    QMenu
 )
 
 class StyleManager:
@@ -41,16 +43,12 @@ class StyleManager:
                 QApplication.setHighDpiScaleFactorRoundingPolicy(
                     Qt.HighDpiScaleFactorRoundingPolicy.RoundPreferFloor)
                 
-                # 启用自动缩放 - PyQt6中某些属性可能已更改
-                QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
+                # 启用高DPI像素图缩放（PyQt6推荐做法）
+                # PyQt6 可能不再支持 AA_UseHighDpiPixmaps，若出错可注释掉此行
+                # QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
                 
-                # 不再使用不存在的属性AA_UseHighDpiPixmaps
                 # 尝试设置其他高DPI相关属性
-                try:
-                    # 如果可能的话，禁用整数缩放
-                    QApplication.setAttribute(Qt.ApplicationAttribute.AA_DisableHighDpiScaling, False)
-                except:
-                    pass
+                # PyQt6 已不再支持 AA_DisableHighDpiScaling，直接跳过此设置
         except:
             # 如果不支持，忽略错误
             pass
@@ -89,10 +87,13 @@ class StyleManager:
         
         # 设置表格属性
         header = table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        if header is not None:
+            header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         table.setAlternatingRowColors(True)
         table.setShowGrid(False)
-        table.verticalHeader().setVisible(False)
+        vheader = table.verticalHeader()
+        if vheader is not None:
+            vheader.setVisible(False)
         
         # 设置编辑触发器
         if not editable:
@@ -328,18 +329,16 @@ QLabel {
                 "Segoe UI";
     font-size: 10pt;
     letter-spacing: 0.4px;      /* 增加字间距 */
-    color: #000000;             /* 纯黑色增强对比度 */
-    /* 保留text-shadow因为Qt支持它，但简化值 */
-    text-shadow: 0 0 1px rgba(0, 0, 0, 0.15);  /* 微弱阴影增强文字边缘 */
+    color: #000000;             /* 纯黑色增强对比度 */    /* 移除text-shadow，因为当前版本的PyQt6不支持它 */
+    /* text-shadow: 0 0 1px rgba(0, 0, 0, 0.15); */  /* 微弱阴影增强文字边缘 */
 }
 
 /* 标题字体 */
 QLabel#title {
     font-size: 13pt;
     letter-spacing: 0.5px;
-    color: #000000;
-    /* 简化text-shadow以增强Qt渲染兼容性 */
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
+    color: #000000;    /* Qt不支持text-shadow属性，已移除 */
+    /* text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2); */
 }
 
 /* 版本标签 */
@@ -361,9 +360,8 @@ QGroupBox {
                 "Segoe UI";
     font-size: 13pt;
     letter-spacing: 0.5px;      /* 标题字间距更大 */
-    color: #000000;             /* 纯黑色标题 */
-    /* 简化text-shadow以增强Qt渲染兼容性 */
-    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+    color: #000000;             /* 纯黑色标题 */    /* Qt不支持text-shadow属性，已移除 */
+    /* text-shadow: 0 1px 0 rgba(0, 0, 0, 0.2); */
 }
 
 QGroupBox::title {
@@ -385,11 +383,11 @@ QPushButton {
                 "Noto Sans CJK SC", "Hiragino Sans GB", "WenQuanYi Micro Hei", 
                 "Segoe UI";
     font-size: 10.5pt;   /* 使用按钮专用字号 */
-    letter-spacing: 0.5px;      /* 增加字间距 */
-    /* 优化文字阴影参数，使其在Qt中更易渲染 */
-    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+    letter-spacing: 0.5px;      /* 增加字间距 */    /* Qt不支持text-shadow属性，已移除 */
+    /* text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5); */
     text-align: center;         /* 水平居中 */
-    qproperty-alignment: AlignCenter; /* Qt特有属性，确保文本居中 */
+    /* QPushButton不支持qproperty-alignment属性，已移除 */
+    /* qproperty-alignment: AlignCenter; */
 }
 
 /* 规则管理区域的编辑按钮 */
@@ -784,15 +782,17 @@ class RuleEditDialog(QDialog):
         self.table.setItem(row, 0, QTableWidgetItem(ip))
         self.table.setItem(row, 1, QTableWidgetItem(domain))
         
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, a0):
         """鼠标按下事件处理 - 用于实现窗口拖动"""
-        self.oldPos = event.globalPosition().toPoint()
+        if a0 is not None:
+            self.oldPos = a0.globalPosition().toPoint()
     
-    def mouseMoveEvent(self, event):
+    def mouseMoveEvent(self, a0):
         """鼠标移动事件处理 - 用于实现窗口拖动"""
-        delta = event.globalPosition().toPoint() - self.oldPos
-        self.move(self.x() + delta.x(), self.y() + delta.y())
-        self.oldPos = event.globalPosition().toPoint()
+        if a0 is not None and hasattr(self, 'oldPos'):
+            delta = a0.globalPosition().toPoint() - self.oldPos
+            self.move(self.x() + delta.x(), self.y() + delta.y())
+            self.oldPos = a0.globalPosition().toPoint()
 
     def add_mapping(self):
         """添加一条新的IP-域名映射"""
@@ -813,9 +813,12 @@ class RuleEditDialog(QDialog):
         """获取所有映射数据"""
         mappings = []
         for row in range(self.table.rowCount()):
-            ip = self.table.item(row, 0).text()
-            domain = self.table.item(row, 1).text()
-            mappings.append((ip, domain))
+            ip_item = self.table.item(row, 0)
+            domain_item = self.table.item(row, 1)
+            if ip_item is not None and domain_item is not None:
+                ip = ip_item.text()
+                domain = domain_item.text()
+                mappings.append((ip, domain))
         return mappings
 
 
@@ -827,6 +830,8 @@ class HostsMonitorUI(QMainWindow):
         self._init_window()
         self._create_ui_structure()
         self._init_ui_state()
+        # 初始化并显示系统托盘图标
+        self._init_tray_icon()
     
     def _init_window(self):
         """初始化窗口基本属性和样式"""
@@ -835,6 +840,24 @@ class HostsMonitorUI(QMainWindow):
         
         # 应用全局样式表
         self.setStyleSheet(StyleManager.get_style_sheet())
+        
+    def set_window_icon(self, icon_path):
+        """
+        设置窗口图标
+        
+        参数:
+        - icon_path: 图标文件路径
+        
+        返回:
+        - bool: 设置成功返回True，失败返回False
+        """
+        try:
+            if os.path.isfile(icon_path):
+                self.setWindowIcon(QIcon(icon_path))
+                return True
+            return False
+        except Exception:
+            return False
     
     def _create_ui_structure(self):
         """创建UI主结构和布局"""
@@ -875,12 +898,14 @@ class HostsMonitorUI(QMainWindow):
         splitter.setSizes([300, 400])
         
         return splitter
-    
     def _init_ui_state(self):
-        """初始化UI状态，加载测试数据"""
-        self.load_test_data()
+        """初始化UI状态"""
+        # 当直接运行UI模块时才加载测试数据
+        if __name__ == "__main__":
+            self.load_test_data()
 
     def load_test_data(self):
+        """加载测试数据用于UI预览"""
         # 加载测试规则
         test_rules = ["test_rule1", "test_rule2", "test_rule3"]
         for rule in test_rules:
@@ -902,27 +927,38 @@ class HostsMonitorUI(QMainWindow):
             
         # 添加预设的模拟日志信息
         self.log_text.clear()  # 清空之前的日志
-        
         # 日志界面测试信息，增强文字渲染效果
-        self.log_text.append('<span style="color:#00FF00">[2023-11-10 08:15:01] [测试] 观察对话框上部两个圆角是否有黑边问题</span>')
-        self.log_text.append('<span style="color:#00FF00">[2023-11-10 08:15:02] [测试] 测试对话框的拖动功能是否正常工作</span>')
-        self.log_text.append('<span style="color:#00FF00">[2023-11-10 08:15:03] [测试] 检查日志区域的自动滚动功能是否正常</span>')
-        self.log_text.append('<span style="color:#00FF00">[2023-11-10 08:15:04] [测试] 验证高DPI下文本是否清晰且无模糊</span>')
-        self.log_text.append('<span style="color:#00FF00">[2023-11-10 08:15:05] [测试] 测试不同字号（9pt、12pt、16pt）下日志字体渲染效果</span>')
-        self.log_text.append('<span style="color:#00FF00">[2023-11-10 08:15:06] [测试] 验证中文与English混排时对齐是否正常</span>')
-        self.log_text.append('<span style="color:#00FF00">[2023-11-10 08:15:07] [测试] 观察滚动条样式与拖动手柄的圆角效果</span>')
-        self.log_text.append('<span style="color:#00FF00">[2023-11-10 08:15:09] [测试] 验证右键菜单功能是否正常弹出</span>')
-        self.log_text.append('<span style="color:#00FF00">[2023-11-10 08:15:10] [测试] 测试复制粘贴日志内容到外部程序</span>')
-        self.log_text.append('<span style="color:#00FF00">[2023-11-10 08:15:12] [测试] 测试日志内容搜索功能是否高亮匹配关键词</span>')
-        self.log_text.append('<span style="color:#00FF00">[2023-11-10 08:15:13] [测试] 验证切换窗口焦点后自动滚动是否暂停</span>')
-        self.log_text.append('<span style="color:#00FF00">[2023-11-10 08:15:14] [测试] 测试日志区域对鼠标拖选文本的支持</span>')
-        self.log_text.append('<span style="color:#00FF00">[2023-11-10 08:15:15] [测试] 验证日志行折叠与展开的表现（如有）</span>')
-        self.log_text.append('<span style="color:#00FF00">[2023-11-10 08:15:16] [测试] 测试日志字体大小动态调整功能</span>')
-        self.log_text.append('<span style="color:#00FF00">[2023-11-10 08:15:17] [测试] 验证日志包含长文本时的自动换行效果</span>')
-        self.log_text.append('<span style="color:#00FF00">[2023-11-10 08:15:18] [测试] 测试日志内容导出到文件功能</span>')
+        test_logs = [
+            "观察对话框上部两个圆角是否有黑边问题",
+            "测试对话框的拖动功能是否正常工作",
+            "检查日志区域的自动滚动功能是否正常",
+            "验证高DPI下文本是否清晰且无模糊",
+            "测试不同字号(9pt、12pt、16pt)下日志字体渲染效果",
+            "验证中文与English混排时对齐是否正常",
+            "观察滚动条样式与拖动手柄的圆角效果",
+            "验证右键菜单功能是否正常弹出",
+            "测试复制粘贴日志内容到外部程序",
+            "测试日志内容搜索功能是否高亮匹配关键词",
+            "验证切换窗口焦点后自动滚动是否暂停",
+            "测试日志区域对鼠标拖选文本的支持",
+            "验证日志行折叠与展开的表现（如有）",
+            "测试日志字体大小动态调整功能",
+            "验证日志包含长文本时的自动换行效果",
+            "测试日志内容导出到文件功能"
+        ]
+        
+        import datetime
+        base_time = datetime.datetime.now()
+        
+        for i, msg in enumerate(test_logs):
+            log_time = (base_time + datetime.timedelta(seconds=i)).strftime('%Y-%m-%d %H:%M:%S')
+            formatted_msg = f'<span style="color:#00FF00">[{log_time}] [测试] {msg}</span>'
+            self.log_text.append(formatted_msg)
 
         # 滚动到底部
-        self.log_text.verticalScrollBar().setValue(self.log_text.verticalScrollBar().maximum())
+        scrollbar = self.log_text.verticalScrollBar()
+        if scrollbar is not None:
+            scrollbar.setValue(scrollbar.maximum())
 
     def _setup_top_area(self, parent_layout):
         """设置顶部功能区域"""
@@ -1020,7 +1056,6 @@ class HostsMonitorUI(QMainWindow):
         parent_layout.addWidget(scroll)
         
         return content_layout
-    
     def _create_add_rule_area(self, parent_layout):
         """创建添加规则的区域"""
         add_rule_layout = QHBoxLayout()
@@ -1031,25 +1066,49 @@ class HostsMonitorUI(QMainWindow):
         
         # 创建添加规则按钮
         self.add_rule_button = QPushButton("+ 添加规则")
-        self.add_rule_button.clicked.connect(self.add_rule_item)
+        # 注意：不在这里连接信号，让控制器来连接
+        # self.add_rule_button.clicked.connect(self.add_rule_item)
         
         # 添加到布局
         add_rule_layout.addWidget(self.new_rule_input)
         add_rule_layout.addWidget(self.add_rule_button)
         parent_layout.addLayout(add_rule_layout)
-    
+
     def add_rule_item(self):
-        """添加一个新的规则项到规则列表"""
+        """
+        添加一个新的规则项到规则列表（仅在UI模块内初始化界面时使用）
+        注意：这个方法在实际使用时已由控制器的 on_add_rule 方法替代，
+        因为复选框状态变更事件需要在控制器中连接和处理
+        """
+        from hosts_monitor.config import add_rule, get_rule
+        from hosts_monitor.monitor import trigger_check
+        from PyQt6.QtWidgets import QMessageBox
+        
         name = self.new_rule_input.text().strip()
         if not name:
             return
             
-        # 创建规则项部件
-        rule_item = self._create_rule_item_widget(name)
-        
-        # 添加到规则内容布局
-        self.rules_content_layout.addWidget(rule_item)
-        self.new_rule_input.clear()
+        # 检查规则名是否已存在
+        if get_rule(name):
+            QMessageBox.warning(self, "规则已存在", f"规则 '{name}' 已存在，请使用其他名称。")
+            return
+        # 添加到配置文件，默认创建一个空的规则（无映射项）
+        if add_rule(name, [], enabled=True):
+            # 注意：此处添加的规则项没有为复选框连接状态变更事件
+            # 在实际应用中，应使用控制器的 on_add_rule 方法，它会调用 load_rules_to_ui
+            # 确保所有规则项的复选框都连接到控制器的 on_toggle_rule 方法
+            
+            # 创建规则项部件
+            rule_item = self._create_rule_item_widget(name)
+            
+            # 添加到规则内容布局
+            self.rules_content_layout.addWidget(rule_item)
+            self.new_rule_input.clear()
+            
+            # 触发检查
+            trigger_check()
+        else:
+            QMessageBox.critical(self, "添加失败", f"无法添加规则 '{name}'，请重试。")
     
     def _create_rule_item_widget(self, rule_name):
         """创建单个规则项的部件"""
@@ -1057,9 +1116,36 @@ class HostsMonitorUI(QMainWindow):
         item_widget = StyleManager.create_rule_item_widget(
             rule_name, 
             lambda: self.open_edit_dialog(rule_name),
-            lambda: item_widget.setParent(None)  # 删除规则项
+            lambda: self.delete_rule(rule_name, item_widget)  # 删除规则项
         )
+        
+        # 注意：复选框的状态变更事件连接应该由控制器处理
+        # 这里不连接事件，返回的 widget 让控制器访问复选框并连接事件
+        
         return item_widget
+        
+    def delete_rule(self, rule_name, item_widget):
+        """删除规则并更新UI"""
+        from hosts_monitor.config import remove_rule
+        from PyQt6.QtWidgets import QMessageBox
+        
+        # 确认删除对话框
+        reply = QMessageBox.question(
+            self, 
+            "确认删除",
+            f"确定要删除规则 '{rule_name}' 吗?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # 从配置文件中删除规则
+            if remove_rule(rule_name):
+                # 从UI中移除规则项
+                item_widget.setParent(None)
+                
+                # 更新映射表格，移除被删除规则的映射
+                self._refresh_mappings_table()
     
     def open_edit_dialog(self, rule_name):
         """打开编辑规则的对话框"""
@@ -1071,17 +1157,33 @@ class HostsMonitorUI(QMainWindow):
         if dlg.exec():
             # 处理对话框返回的结果（实际应用中应保存到数据存储）
             self._save_rule_mappings(rule_name, dlg)
-    
     def _get_rule_mappings(self, rule_name):
-        """获取指定规则的映射数据（示例实现）"""
-        # 这里应该从实际数据存储中获取数据
-        # 示例中返回空列表
+        """获取指定规则的映射数据"""
+        # 从配置模块获取规则数据
+        from hosts_monitor.config import get_rule
+        
+        rule = get_rule(rule_name)
+        if rule and 'entries' in rule:
+            # 转换配置模块的格式为对话框所需的格式
+            return [(entry['ip'], entry['domain']) for entry in rule['entries']]
         return []
-    
     def _save_rule_mappings(self, rule_name, dialog):
-        """保存规则映射数据（示例实现）"""
-        # 实际应用中应该将对话框中的数据保存到数据存储
-        pass
+        """保存规则映射数据到配置文件"""
+        from hosts_monitor.config import update_rule
+        from hosts_monitor.monitor import trigger_check
+        
+        # 获取对话框中的映射数据
+        mappings = dialog.get_mappings()
+        
+        # 转换为配置模块所需的格式
+        entries = [{'ip': ip, 'domain': domain} for ip, domain in mappings]
+        
+        # 更新规则
+        if update_rule(rule_name, {'entries': entries}):
+            # 刷新映射表格
+            self._refresh_mappings_table()
+            # 触发检查
+            trigger_check()
     
     def _setup_mappings_area(self, parent_widget):
         """设置规则映射区域，显示所有规则的映射关系"""
@@ -1135,6 +1237,76 @@ class HostsMonitorUI(QMainWindow):
         StyleManager.optimize_text_editor_layout(log_text)
         
         return log_text
+    
+    def _init_tray_icon(self):
+        """初始化系统托盘图标和菜单"""
+        # 创建托盘图标
+        self.tray_icon = QSystemTrayIcon(self)
+        # 加载图标资源
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        icon_file = os.path.join(base_path, 'resources', 'icon.ico')
+        if os.path.exists(icon_file):
+            self.tray_icon.setIcon(QIcon(icon_file))
+        else:
+            self.tray_icon.setIcon(self.windowIcon())
+        self.tray_icon.setToolTip('Hosts Monitor')
+        # 创建托盘菜单
+        menu = QMenu()
+        restore_action = QAction('显示主界面', self)
+        restore_action.triggered.connect(self.showNormal)
+        exit_action = QAction('退出', self)
+        # 退出应用
+        # 退出应用
+        exit_action.triggered.connect(QApplication.quit)
+        menu.addAction(restore_action)
+        menu.addAction(exit_action)
+        self.tray_icon.setContextMenu(menu)
+        # 托盘图标激活事件
+        self.tray_icon.activated.connect(self._on_tray_activated)
+
+    def _on_tray_activated(self, reason):
+        """托盘图标点击处理"""
+        if reason == QSystemTrayIcon.ActivationReason.Trigger or reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self.showNormal()
+            self.activateWindow()
+
+    def changeEvent(self, a0):
+        """窗口状态变化时处理最小化到托盘"""
+        # 当窗口状态改变时，检查是否最小化
+        if a0 is not None and a0.type() == QEvent.Type.WindowStateChange:
+            if self.isMinimized():
+                # 延迟隐藏窗口，确保托盘消息正常显示
+                QTimer.singleShot(0, self.hide)
+                self.tray_icon.show()
+                self.tray_icon.showMessage(
+                    'Hosts Monitor', '已最小化到托盘',
+                    QSystemTrayIcon.MessageIcon.Information, 2000
+                )
+        super().changeEvent(a0)
+
+    def _refresh_mappings_table(self):
+        """刷新映射表格，显示所有规则的映射"""
+        from hosts_monitor.config import get_all_rules
+        
+        # 清空表格
+        self.mappings_table.setRowCount(0)
+        
+        # 加载所有规则的映射
+        rules = get_all_rules()
+        for rule in rules:
+            rule_name = rule.get('name', '')
+            entries = rule.get('entries', [])
+            
+            for entry in entries:
+                ip = entry.get('ip', '')
+                domain = entry.get('domain', '')
+                
+                if ip and domain:
+                    row = self.mappings_table.rowCount()
+                    self.mappings_table.insertRow(row)
+                    self.mappings_table.setItem(row, 0, QTableWidgetItem(ip))
+                    self.mappings_table.setItem(row, 1, QTableWidgetItem(domain))
+                    self.mappings_table.setItem(row, 2, QTableWidgetItem(rule_name))
 
 
 def setup_application():
@@ -1156,12 +1328,18 @@ def setup_application():
     return app
 
 if __name__ == "__main__":
-    # 创建并配置应用程序
-    app = setup_application()
+    """
+    UI模块直接运行时的测试入口
+    用于设计和预览界面，加载测试数据
+    """
+    app = QApplication(sys.argv)
+    
+    # 应用DPI缩放和StyleManager相关设置
+    StyleManager.apply_dpi_scaling()
     
     # 创建并显示主窗口
-    window = HostsMonitorUI()
-    window.show()
+    main_window = HostsMonitorUI()
+    main_window.show()
     
-    # 运行应用程序主循环
+    # 启动应用程序
     sys.exit(app.exec())
