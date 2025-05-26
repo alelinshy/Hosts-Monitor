@@ -128,6 +128,9 @@ class HostsMonitorUI(QMainWindow):
         self.icon_path = self._get_icon_path()
         self.setWindowIcon(QIcon(self.icon_path))
         
+        # 设置窗口标志，使其最小化时只在系统托盘显示
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.Tool)
+        
         # 窗口大小和样式
         self.setMinimumSize(200, 450)
         self.setup_window_style()

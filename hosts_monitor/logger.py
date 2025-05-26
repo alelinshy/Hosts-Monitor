@@ -42,8 +42,16 @@ class HostsMonitorLogger:
         console_handler.setFormatter(logging.Formatter(LOG_FORMAT, DATE_FORMAT))
         self.logger.addHandler(console_handler)
         
-        # 创建日志目录
-        log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
+        # 确定软件运行目录
+        if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+            # PyInstaller打包后的运行目录
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            # 开发环境运行目录
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        
+        # 创建日志目录，直接在软件运行目录下
+        log_dir = os.path.join(base_dir, "logs")
         os.makedirs(log_dir, exist_ok=True)
         
         # 添加文件处理器
