@@ -40,6 +40,7 @@ from functools import wraps
 from datetime import datetime, timedelta
 from watchfiles import watch, Change
 import asyncio
+from enum import Enum, auto
 
 # 导入其他模块
 try:
@@ -69,11 +70,20 @@ except ImportError:
         
     def get_setting(key, default=None):
         settings = {
-            'monitor_interval': 2000,  # 监控间隔，单位毫秒
             'monitor_debounce': 3000,  # 去抖时间，单位毫秒
             'monitor_enabled': True    # 是否启用监控
         }
         return settings.get(key, default)
+
+
+class MonitorEvent(Enum):
+    """监控事件类型"""
+    CHECK = auto()                     # 普通检查事件
+    MONITOR_INITIALIZED = auto()        # 监控模块初始化完成
+    NEW_RULE = auto()                  # 新建规则
+    ENABLE_RULE = auto()               # 启用规则
+    NEW_IP_DOMAIN = auto()             # 添加新的IP和域名
+    HOSTS_CHANGED = auto()             # hosts文件发生变化
 
 
 # 全局变量
@@ -133,12 +143,8 @@ def _process_file_change(change_type: Change, file_path: str) -> None:
     if not _debounce():
         logger.info("短时间内已处理过变化，跳过本次检查")
         return
-    
-    # 执行对比检查，如有需要将触发修复
-    if not check_hosts():
-        logger.warning("检测到 Hosts 文件与规则不一致，已触发修复流程")
-    else:
-        logger.info("Hosts 文件内容与规则一致，无需修复")
+      # 将文件变化事件加入队列
+    trigger_event(MonitorEvent.HOSTS_CHANGED)
 
 
 @auto_log
@@ -174,12 +180,13 @@ def _monitor_worker() -> None:
                 
                 if norm_path == hosts_norm_path:
                     _process_file_change(change_type, file_path)
-            
-            # 处理队列中的事件
+              # 处理队列中的事件
             while not _event_queue.empty():
                 try:
                     event = _event_queue.get_nowait()
-                    if event == "check":
+                    if isinstance(event, MonitorEvent):
+                        _process_event(event)
+                    elif event == "check":  # 向后兼容旧的检查事件
                         logger.info("处理队列中的检查请求")
                         check_hosts()
                     _event_queue.task_done()
@@ -272,6 +279,25 @@ def stop_monitoring() -> bool:
 
 
 @auto_log
+def trigger_event(event: MonitorEvent) -> None:
+    """
+    触发指定的监控事件
+    
+    参数:
+        event: 要触发的事件类型，使用MonitorEvent枚举
+    """
+    global _event_queue
+    
+    # 如果监控未运行，记录日志但不执行操作
+    if _monitor_thread is None or not _monitor_thread.is_alive():
+        logger.info(f"监控未运行，事件 {event.name} 将不会被处理")
+        return
+    
+    # 将事件加入队列
+    logger.info(f"将事件 {event.name} 加入监控队列")
+    _event_queue.put(event)
+
+@auto_log
 def trigger_check() -> None:
     """
     手动触发 Hosts 文件检查
@@ -279,18 +305,29 @@ def trigger_check() -> None:
     此函数将检查请求添加到事件队列中，由监控线程处理
     如果监控线程未运行，则推荐使用controller._background_check()调用
     """
-    global _event_queue
+    trigger_event(MonitorEvent.CHECK)
+
+@auto_log
+def _process_event(event: MonitorEvent) -> None:
+    """
+    处理监控事件
     
-    # 如果监控未运行，则通过日志提醒，但不直接执行
-    # 这样避免阻塞调用线程，尤其是UI线程
-    if _monitor_thread is None or not _monitor_thread.is_alive():
-        logger.info("监控未运行，触发检查将不会执行")
-        # 这里不再直接执行check_hosts()，而是建议使用后台线程执行
-        return
+    参数:
+        event: 要处理的事件类型
+    """
+    logger.info(f"处理事件: {event.name}")
     
-    # 将检查事件加入队列
-    logger.info("将检查请求加入监控队列")
-    _event_queue.put("check")
+    # 检查并在必要时修复
+    check_result = check_hosts()
+    if not check_result:
+        logger.warning("检测到不一致，正在执行修复")
+        repair_result = repair_hosts()
+        if repair_result:
+            logger.info("修复成功完成")
+        else:
+            logger.error("修复失败")
+    else:
+        logger.info("检查通过，无需修复")
 
 
 @auto_log

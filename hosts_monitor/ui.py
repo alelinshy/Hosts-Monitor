@@ -796,12 +796,37 @@ class RuleEditDialog(QDialog):
 
     def add_mapping(self):
         """添加一条新的IP-域名映射"""
-        ip = self.ip_input.text().strip()
-        domain = self.domain_input.text().strip()
-        if ip and domain:
+        try:
+            ip = self.ip_input.text().strip()
+            domain = self.domain_input.text().strip()
+            if not ip:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "输入错误", "请输入有效的IP地址")
+                return
+                
+            if not domain:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "输入错误", "请输入有效的域名")
+                return
+                
+            # 防止重复添加相同的映射
+            for row in range(self.table.rowCount()):
+                ip_item = self.table.item(row, 0)
+                domain_item = self.table.item(row, 1)
+                if ip_item and domain_item and ip_item.text() == ip and domain_item.text() == domain:
+                    from PyQt6.QtWidgets import QMessageBox
+                    QMessageBox.information(self, "提示", "此IP和域名映射已存在")
+                    return
+                    
+            # 添加映射到表格
             self._add_mapping_to_table(ip, domain)
             self.ip_input.clear()
             self.domain_input.clear()
+        except Exception as e:
+            import traceback
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "错误", f"添加映射时发生错误: {str(e)}")
+            traceback.print_exc()
 
     def remove_selected(self):
         """删除选中的映射"""
@@ -1159,14 +1184,22 @@ class HostsMonitorUI(QMainWindow):
     
     def open_edit_dialog(self, rule_name):
         """打开编辑规则的对话框"""
-        # 获取当前规则的映射（实际应用中应从数据存储中获取）
-        mappings = self._get_rule_mappings(rule_name)
-        
-        # 创建并显示对话框
-        dlg = RuleEditDialog(rule_name, mappings, self)
-        if dlg.exec():
-            # 处理对话框返回的结果（实际应用中应保存到数据存储）
-            self._save_rule_mappings(rule_name, dlg)
+        try:
+            # 获取当前规则的映射（实际应用中应从数据存储中获取）
+            mappings = self._get_rule_mappings(rule_name)
+            
+            # 创建并显示对话框
+            dlg = RuleEditDialog(rule_name, mappings, self)
+            if dlg.exec():
+                # 处理对话框返回的结果（实际应用中应保存到数据存储）
+                self._save_rule_mappings(rule_name, dlg)
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            import traceback
+            error_msg = str(e)
+            QMessageBox.critical(self, "错误", f"打开编辑对话框时发生异常：{error_msg}")
+            traceback.print_exc()
+            
     def _get_rule_mappings(self, rule_name):
         """获取指定规则的映射数据"""
         # 从配置模块获取规则数据
@@ -1177,23 +1210,34 @@ class HostsMonitorUI(QMainWindow):
             # 转换配置模块的格式为对话框所需的格式
             return [(entry['ip'], entry['domain']) for entry in rule['entries']]
         return []
+        
     def _save_rule_mappings(self, rule_name, dialog):
         """保存规则映射数据到配置文件"""
         from hosts_monitor.config import update_rule
         from hosts_monitor.monitor import trigger_check
+        from PyQt6.QtWidgets import QMessageBox
         
-        # 获取对话框中的映射数据
-        mappings = dialog.get_mappings()
-        
-        # 转换为配置模块所需的格式
-        entries = [{'ip': ip, 'domain': domain} for ip, domain in mappings]
-        
-        # 更新规则
-        if update_rule(rule_name, {'entries': entries}):
-            # 刷新映射表格
-            self._refresh_mappings_table()
-            # 触发检查
-            trigger_check()
+        try:
+            # 获取对话框中的映射数据
+            mappings = dialog.get_mappings()
+            
+            # 转换为配置模块所需的格式
+            entries = [{'ip': ip, 'domain': domain} for ip, domain in mappings]
+            
+            # 更新规则
+            if update_rule(rule_name, {'entries': entries}):
+                # 刷新映射表格 - 只加载启用的规则
+                self._refresh_mappings_table()
+                # 触发检查
+                trigger_check()
+            else:
+                QMessageBox.critical(self, "错误", f"更新规则 '{rule_name}' 失败，请重试。")
+        except Exception as e:
+            import traceback
+            error_msg = str(e)
+            QMessageBox.critical(self, "错误", f"保存规则映射时发生异常：{error_msg}")
+            # 记录详细错误信息
+            traceback.print_exc()
     
     def _setup_mappings_area(self, parent_widget):
         """设置规则映射区域，显示所有规则的映射关系"""
@@ -1299,20 +1343,19 @@ class HostsMonitorUI(QMainWindow):
                     QSystemTrayIcon.MessageIcon.Information, 2000
                 )
         super().changeEvent(a0)
-
+        
     def _refresh_mappings_table(self):
-        """刷新映射表格，显示所有规则的映射"""
-        from hosts_monitor.config import get_all_rules
+        """刷新映射表格，直接从配置文件读取并显示所有启用规则的映射"""
+        from hosts_monitor.config import get_enabled_rules
         
         # 清空表格
         self.mappings_table.setRowCount(0)
         
-        # 加载所有规则的映射
-        rules = get_all_rules()
-        # 仅显示启用规则的映射
+        # 直接加载已启用规则的映射
+        rules = get_enabled_rules()
+        
+        # 显示启用规则的映射
         for rule in rules:
-            if not rule.get('enabled', False):
-                continue
             rule_name = rule.get('name', '')
             entries = rule.get('entries', [])
             for entry in entries:

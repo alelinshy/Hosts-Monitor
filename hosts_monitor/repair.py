@@ -388,21 +388,22 @@ def repair_hosts() -> bool:
     返回:
         bool: 修复是否成功
     """
-    # 获取延迟时间设置
-    delay_ms = get_setting('delay_ms', 3000)  # 默认延迟 3 秒
-    logger.info(f"开始修复 Hosts 文件，等待延迟 {delay_ms} 毫秒...")
-    
-    # 等待指定延迟时间
-    time.sleep(delay_ms / 1000.0)
-    
-    # 尝试获取文件写入权限
-    handle, success = open_hosts_for_writing()
-    
-    if not success:
-        logger.error("无法获取 Hosts 文件写入权限，修复终止")
-        return False
-    
+    handle = None
     try:
+        # 获取延迟时间设置
+        delay_ms = get_setting('delay_ms', 3000)  # 默认延迟 3 秒
+        logger.info(f"开始修复 Hosts 文件，等待延迟 {delay_ms} 毫秒...")
+        
+        # 等待指定延迟时间
+        time.sleep(delay_ms / 1000.0)  # 转换为秒
+        
+        # 尝试获取文件写入权限
+        handle, success = open_hosts_for_writing()
+        
+        if not success:
+            logger.error("无法获取 Hosts 文件写入权限，修复终止")
+            return False
+        
         # 读取当前 Hosts 文件内容
         hosts_content = read_hosts_content(handle)
         if not hosts_content:
@@ -435,18 +436,23 @@ def repair_hosts() -> bool:
         else:
             logger.error("写入 Hosts 文件失败，修复失败")
             return False
-        
+            
     except Exception as e:
         logger.error(f"修复 Hosts 文件时发生异常: {str(e)}")
+        import traceback
+        logger.error(f"详细错误信息:\n{traceback.format_exc()}")
         return False
+        
     finally:
-        # 无论成功还是失败，都释放文件句柄
-        try:
-            if handle:
+        # 无论成功还是失败，都尝试释放文件句柄
+        if handle:
+            try:
                 win32file.CloseHandle(handle)
                 logger.info("释放 Hosts 文件句柄")
-        except Exception as e:
-            logger.error(f"释放 Hosts 文件句柄时发生异常: {str(e)}")
+            except Exception as e:
+                logger.error(f"释放 Hosts 文件句柄时发生异常: {str(e)}")
+                import traceback
+                logger.error(f"详细错误信息:\n{traceback.format_exc()}")
 
 
 # 当脚本直接运行时，执行测试修复

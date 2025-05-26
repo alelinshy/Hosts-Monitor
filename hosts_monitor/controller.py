@@ -130,7 +130,6 @@ class MainController(QObject):
         
         # 设置版本信息
         self.ui.version_label.setText(f"版本: {VERSION}")
-        
         # 加载规则数据
         self.load_rules_to_ui()
         
@@ -139,7 +138,6 @@ class MainController(QObject):
         
         # 清除测试数据
         self.ui.log_text.clear()
-        self.ui.mappings_table.setRowCount(0)
           # 检查管理员权限，如果已经具备则禁用提权按钮
         if is_admin():
             self.ui.admin_button.setEnabled(False)
@@ -162,8 +160,7 @@ class MainController(QObject):
         
         # 设置项信号
         self.ui.auto_start_checkbox.stateChanged.connect(self.on_toggle_auto_start)
-        self.ui.apply_delay_button.clicked.connect(self.on_apply_delay)
-        
+        self.ui.apply_delay_button.clicked.connect(self.on_apply_delay)        
         logger.info("事件处理绑定完成")
     
     def start(self):
@@ -172,6 +169,9 @@ class MainController(QObject):
         """
         # 启动文件监控
         self.start_monitoring()
+        
+        # 显示主窗口前刷新一次映射表格，确保启动时能显示映射
+        self.ui._refresh_mappings_table()
         
         # 显示主窗口
         self.ui.show()
@@ -205,7 +205,6 @@ class MainController(QObject):
             logger.info("Hosts 监控未启用")
             logger.info("Hosts 文件状态: 未监控")
             self._last_status = "未监控"
-    
     def load_rules_to_ui(self):
         """
         加载规则数据到 UI
@@ -218,8 +217,7 @@ class MainController(QObject):
                 if widget:
                     widget.setParent(None)
         
-        # 清空映射表格
-        self.ui.mappings_table.setRowCount(0)
+        # 不清空映射表格，让_refresh_mappings_table方法去处理
         
         # 加载所有规则
         rules = get_all_rules()
@@ -246,10 +244,9 @@ class MainController(QObject):
                 
                 # 添加到布局
                 self.ui.rules_content_layout.addWidget(rule_widget)
-                
-                # 添加映射到表格
-                self.add_rule_mappings_to_table(rule)
-    
+        
+        # 刷新映射表格，直接从配置文件读取已启用规则
+        self.ui._refresh_mappings_table()
     def add_rule_mappings_to_table(self, rule):
         """
         将规则的映射添加到映射表格
@@ -257,6 +254,10 @@ class MainController(QObject):
         参数:
             rule: 规则数据字典
         """
+        # 仅添加已启用规则的映射
+        if not rule.get('enabled', False):
+            return
+            
         rule_name = rule.get('name', '')
         entries = rule.get('entries', [])
         
@@ -270,6 +271,20 @@ class MainController(QObject):
                 self.ui.mappings_table.setItem(row, 0, QTableWidgetItem(ip))
                 self.ui.mappings_table.setItem(row, 1, QTableWidgetItem(domain))
                 self.ui.mappings_table.setItem(row, 2, QTableWidgetItem(rule_name))
+                
+    def refresh_mappings_table(self):
+        """
+        刷新映射表格，直接从配置文件读取并显示所有启用规则的映射
+        """
+        # 清空表格
+        self.ui.mappings_table.setRowCount(0)
+        
+        # 直接加载已启用规则的映射
+        rules = get_enabled_rules()
+        
+        # 显示启用规则的映射
+        for rule in rules:
+            self.add_rule_mappings_to_table(rule)
     
     def load_settings_to_ui(self):
         """
@@ -302,6 +317,7 @@ class MainController(QObject):
     # update_status 方法已移除，不再需要定期检查监控状态
     
     # -------------------- 事件处理函数 -------------------- #
+    
     def on_add_rule(self):
         """
         添加新规则按钮点击处理
@@ -335,10 +351,11 @@ class MainController(QObject):
                 
                 # 重新加载规则到 UI，确保所有规则项的复选框都正确连接信号
                 self.load_rules_to_ui()
-                  # 在后台线程中触发检查，避免UI卡顿
-                thread = threading.Thread(target=self._background_check, daemon=True)
-                thread.start()
-            else:                
+                # 触发新规则和新IP域名事件
+                from hosts_monitor.monitor import trigger_event, MonitorEvent
+                trigger_event(MonitorEvent.NEW_RULE)
+                trigger_event(MonitorEvent.NEW_IP_DOMAIN)
+            else:
                 logger.error(f"添加规则 {rule_name} 失败")
                 self.show_message("错误", f"无法添加规则: {rule_name}", QMessageBox.Icon.Critical)
                 
@@ -352,16 +369,21 @@ class MainController(QObject):
         """
         enabled = state == Qt.CheckState.Checked.value
         status = "启用" if enabled else "禁用"
-        
-        # 修改规则状态但禁止触发检查和修复，只更新配置
-        # 绕过 update_rule 直接更新规则状态，避免触发修复流程
+          # 修改规则状态
         rule = get_rule(rule_name)
         if rule:
-            rule['enabled'] = enabled
-            # 直接调用 save_config 保存配置
+            rule['enabled'] = enabled            # 保存配置并触发事件
             from hosts_monitor.config import save_config
+            from hosts_monitor.monitor import trigger_event, MonitorEvent
             if save_config():
                 logger.info(f"已{status}规则: {rule_name}")
+                # 刷新映射表格，确保UI与配置文件同步
+                # 调用UI的方法刷新映射表格
+                self.ui._refresh_mappings_table()
+                
+                # 仅在规则启用时触发事件
+                if enabled:
+                    trigger_event(MonitorEvent.ENABLE_RULE)
             else:
                 logger.error(f"{status}规则 {rule_name} 失败")
                 
