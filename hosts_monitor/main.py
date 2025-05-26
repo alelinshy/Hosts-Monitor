@@ -6,12 +6,16 @@
 import os
 import sys
 import ctypes
+import subprocess
 from PyQt6.QtWidgets import QApplication
 
 from . import logger
 from .version import APP_NAME, VERSION
 from .config import config
 from .controller import controller
+
+# 任务计划名称常量
+TASK_NAME = f"{APP_NAME.replace(' ', '_')}_AdminTask"
 
 
 def check_single_instance() -> bool:
@@ -29,6 +33,51 @@ def check_single_instance() -> bool:
         return False
 
 
+def check_task_exists() -> bool:
+    """检查管理员权限任务计划是否存在"""
+    try:
+        # 使用schtasks命令查询任务是否存在
+        result = subprocess.run(
+            ['schtasks', '/query', '/tn', TASK_NAME], 
+            capture_output=True, 
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        # 如果返回码为0，表示任务存在
+        return result.returncode == 0
+    except Exception as e:
+        logger.error(f"检查任务计划时发生错误: {str(e)}")
+        return False
+
+
+def run_as_task() -> bool:
+    """通过任务计划以管理员权限运行程序"""
+    try:
+        # 检查任务是否存在
+        if check_task_exists():
+            # 获取当前程序的路径
+            if getattr(sys, 'frozen', False):
+                app_path = sys.executable
+            else:
+                app_path = sys.executable
+                app_args = f'"{os.path.abspath(sys.argv[0])}"'
+            
+            # 使用schtasks命令运行任务
+            subprocess.Popen(
+                ['schtasks', '/run', '/tn', TASK_NAME],
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            logger.info(f"已通过任务计划启动管理员权限实例")
+            return True
+        else:
+            logger.warning("任务计划不存在，无法通过任务计划启动")
+            return False
+    except Exception as e:
+        logger.error(f"通过任务计划启动失败: {str(e)}")
+        return False
+
+
 def check_and_run_as_admin() -> bool:
     """检查是否需要以管理员权限运行"""
     # 先检查是否已经具有管理员权限
@@ -43,7 +92,13 @@ def check_and_run_as_admin() -> bool:
         if "--already-trying-uac" in sys.argv:
             logger.error("已经尝试过请求管理员权限但失败")
             return False
+        
+        # 首先尝试通过任务计划启动
+        if run_as_task():
+            # 如果成功通过任务计划启动，则退出当前实例
+            return True
             
+        # 如果任务计划不存在或启动失败，则使用传统的UAC提权方式
         try:
             # 获取当前程序路径
             if getattr(sys, 'frozen', False):

@@ -105,7 +105,7 @@ class HostsMonitorUI(QMainWindow):
     """Hosts Monitor UI类"""
     
     # 布局常量
-    TOP_GROUP_HEIGHT = 150  # 顶部控制面板固定高度
+    TOP_GROUP_HEIGHT = 130  # 顶部控制面板固定高度
     
     # 信号定义
     log_updated = pyqtSignal(str)
@@ -499,6 +499,95 @@ class HostsMonitorUI(QMainWindow):
             self.admin_btn.setEnabled(True)
             logger.info("当前程序没有管理员权限")
             
+    def create_admin_task(self) -> bool:
+        """创建管理员权限的任务计划"""
+        try:
+            # 获取程序完整路径
+            if getattr(sys, 'frozen', False):
+                app_path = sys.executable
+            else:
+                # 对于脚本，使用Python解释器启动
+                app_path = f'"{sys.executable}" "{os.path.abspath(sys.argv[0])}"'
+            
+            # 任务计划名称
+            task_name = f"{APP_NAME.replace(' ', '_')}_AdminTask"
+            
+            # 工作目录
+            work_dir = os.path.dirname(os.path.abspath(app_path if getattr(sys, 'frozen', False) else sys.argv[0]))
+            
+            # 创建XML文件内容
+            xml_content = f"""<?xml version="1.0" encoding="UTF-16"?>
+    <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+      <RegistrationInfo>
+    <Description>{APP_NAME} 管理员权限启动任务</Description>
+      </RegistrationInfo>
+      <Principals>
+    <Principal id="Author">
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+      </Principals>
+      <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>false</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+      </Settings>
+      <Actions Context="Author">
+    <Exec>
+      <Command>{app_path}</Command>
+      <WorkingDirectory>{work_dir}</WorkingDirectory>
+    </Exec>
+      </Actions>
+    </Task>
+    """
+            
+            # 创建临时XML文件
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix='.xml', delete=False, mode='w', encoding='utf-16') as temp:
+                temp_xml_path = temp.name
+                temp.write(xml_content)
+            
+            # 使用schtasks创建任务
+            logger.info(f"正在创建管理员权限任务计划: {task_name}")
+            result = subprocess.run(
+                ['schtasks', '/create', '/tn', task_name, '/xml', temp_xml_path, '/f'],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            
+            # 删除临时XML文件
+            try:
+                os.unlink(temp_xml_path)
+            except:
+                pass
+            
+            # 检查是否成功
+            if result.returncode == 0:
+                logger.info("管理员权限任务计划创建成功")
+                return True
+            else:
+                logger.error(f"创建任务计划失败: {result.stderr}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"创建管理员权限任务计划失败: {str(e)}")
+            return False
+    
     def run_as_admin(self) -> None:
         """以管理员权限运行程序"""
         if self.is_admin():
@@ -511,6 +600,30 @@ class HostsMonitorUI(QMainWindow):
             # 设置下次以管理员权限运行
             config.set("general", "run_as_admin", True)
             config.save_config()
+            
+            # 首先尝试创建管理员权限的任务计划
+            # 此操作需要UAC确认，但只需要一次
+            if self.create_admin_task():
+                # 创建成功后，使用任务计划启动程序
+                task_name = f"{APP_NAME.replace(' ', '_')}_AdminTask"
+                logger.info(f"正在通过任务计划启动: {task_name}")
+                
+                # 启动任务
+                subprocess.Popen(
+                    ['schtasks', '/run', '/tn', task_name],
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                
+                # 关闭系统托盘图标
+                self.tray_icon.hide()
+                
+                # 等待一会儿后退出当前实例
+                logger.info("管理员权限的新实例通过任务计划启动，当前实例即将退出")
+                QTimer.singleShot(1000, QApplication.quit)
+                return
+            
+            # 如果任务计划创建失败，回退到传统的UAC方式
+            logger.warning("创建任务计划失败，将使用传统UAC方式请求管理员权限")
             
             # 获取当前程序路径
             if getattr(sys, 'frozen', False):
