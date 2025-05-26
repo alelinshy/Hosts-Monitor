@@ -508,15 +508,25 @@ class HostsMonitorUI(QMainWindow):
             self.admin_btn.setEnabled(True)
             logger.info("当前程序没有管理员权限")
             
-    def create_admin_task(self) -> bool:
-        """创建管理员权限的任务计划"""
+    def create_admin_task(self, add_restart_param=False) -> bool:
+        """创建管理员权限的任务计划
+        
+        Args:
+            add_restart_param: 是否添加重启参数，用于开机自动启动时
+        """
         try:
             # 获取程序完整路径
             if getattr(sys, 'frozen', False):
                 app_path = sys.executable
+                # 如果需要添加重启参数
+                app_args = "--restarting" if add_restart_param else ""
             else:
                 # 对于脚本，使用Python解释器启动
-                app_path = f'"{sys.executable}" "{os.path.abspath(sys.argv[0])}"'
+                app_path = sys.executable
+                if add_restart_param:
+                    app_args = f'"{os.path.abspath(sys.argv[0])}" --restarting'
+                else:
+                    app_args = f'"{os.path.abspath(sys.argv[0])}"'
             
             # 任务计划名称
             task_name = f"{APP_NAME.replace(' ', '_')}_AdminTask"
@@ -558,6 +568,7 @@ class HostsMonitorUI(QMainWindow):
               <Actions Context="Author">
                 <Exec>
                   <Command>{app_path}</Command>
+                  {f'<Arguments>{app_args}</Arguments>' if app_args else ''}
                   <WorkingDirectory>{work_dir}</WorkingDirectory>
                 </Exec>
               </Actions>

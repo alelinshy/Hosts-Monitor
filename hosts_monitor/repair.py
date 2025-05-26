@@ -124,9 +124,9 @@ class RepairModule:
             if "# Hosts Monitor 数据" in config_line:
                 is_hosts_monitor_data = True
                 
-            # 对于普通注释行，如果不是特定的"# Hosts Monitor 数据"部分，则跳过
-            if config_line.startswith('#') and not is_hosts_monitor_data and "# Hosts Monitor 数据" not in config_line:
-                continue
+            # 所有注释行都作为基准行，不再跳过普通注释行
+            # if config_line.startswith('#') and not is_hosts_monitor_data and "# Hosts Monitor 数据" not in config_line:
+            #     continue
                 
             for i, hosts_line in enumerate(hosts_lines):
                 hosts_line = hosts_line.strip()

@@ -56,7 +56,14 @@ def run_as_task() -> bool:
     try:
         # 检查任务是否存在
         if check_task_exists():
-            # 使用schtasks命令运行任务
+            # 如果是重启操作，使用带重启参数的任务
+            if "--restarting" in sys.argv:
+                # 更新任务计划的参数
+                from .ui import MainWindow
+                temp_ui = MainWindow()
+                temp_ui.create_admin_task(add_restart_param=True)
+            
+            # 运行任务
             subprocess.Popen(
                 ['schtasks', '/run', '/tn', TASK_NAME],
                 creationflags=subprocess.CREATE_NO_WINDOW
@@ -66,6 +73,12 @@ def run_as_task() -> bool:
             return True
         else:
             logger.warning("任务计划不存在，无法通过任务计划启动")
+            
+            # 尝试创建任务计划
+            if create_restart_task():
+                # 重试运行
+                return run_as_task()
+            
             return False
     except Exception as e:
         logger.error(f"通过任务计划启动失败: {str(e)}")
@@ -79,6 +92,9 @@ def check_and_run_as_admin() -> bool:
         is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
     except:
         is_admin = False
+    
+    # 检查是否为重启标识
+    is_restarting = "--restarting" in sys.argv
     
     # 如果配置了需要管理员权限，但当前没有管理员权限，则尝试提权
     if config.get("general", "run_as_admin", False) and not is_admin:
@@ -99,10 +115,16 @@ def check_and_run_as_admin() -> bool:
                 app_path = sys.executable
                 # 创建命令行参数，添加一个标记防止死循环
                 app_args = "--already-trying-uac"
+                # 如果是重启，保留重启标识
+                if is_restarting:
+                    app_args += " --restarting"
             else:
                 # 对于脚本，使用Python解释器启动
                 app_path = sys.executable
                 app_args = f'"{os.path.abspath(sys.argv[0])}" --already-trying-uac'
+                # 如果是重启，保留重启标识
+                if is_restarting:
+                    app_args += " --restarting"
             
             # 设置工作目录
             work_dir = os.path.dirname(os.path.abspath(app_path if getattr(sys, 'frozen', False) else sys.argv[0]))
@@ -161,6 +183,74 @@ def check_and_run_as_admin() -> bool:
     return False
 
 
+def create_restart_task() -> bool:
+    """创建重启时使用的静默管理员权限任务"""
+    try:
+        # 检查任务是否已存在
+        if check_task_exists():
+            return True
+            
+        logger.info("检测到需要创建管理员权限任务计划")
+        
+        # 导入UI模块中的创建任务方法
+        from .ui import MainWindow
+        
+        # 创建临时UI对象以调用方法
+        temp_ui = MainWindow()
+        result = temp_ui.create_admin_task()
+        
+        if result:
+            logger.info("管理员权限任务计划创建成功")
+            return True
+        else:
+            logger.error("创建任务计划失败")
+            return False
+    except Exception as e:
+        logger.error(f"创建管理员权限任务计划失败: {str(e)}")
+        return False
+
+
+def register_system_restart() -> bool:
+    """注册系统重启时的自动启动任务"""
+    try:
+        # 检查是否具有管理员权限
+        is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+        if not is_admin:
+            logger.warning("没有管理员权限，无法注册系统重启任务")
+            return False
+            
+        # 导入UI模块
+        from .ui import MainWindow
+        
+        # 创建临时UI对象以调用方法
+        temp_ui = MainWindow()
+        
+        # 使用UI模块的方法创建带有重启参数的任务计划
+        if not temp_ui.create_admin_task(add_restart_param=True):
+            logger.error("无法创建重启任务")
+            return False
+            
+        # 注册系统启动项
+        import winreg
+        key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+        
+        try:
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_SET_VALUE)
+        except:
+            key = winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, key_path)
+            
+        # 设置启动命令为运行任务计划
+        cmd = f'schtasks /run /tn "{TASK_NAME}"'
+        winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, cmd)
+        winreg.CloseKey(key)
+        
+        logger.info("系统重启任务注册成功")
+        return True
+    except Exception as e:
+        logger.error(f"注册系统重启任务失败: {str(e)}")
+        return False
+
+
 def main() -> int:
     """主函数"""
     logger.info(f"{APP_NAME} v{VERSION} 正在启动...")
@@ -169,6 +259,9 @@ def main() -> int:
     if not check_single_instance():
         logger.error("程序已经在运行中，不允许多个实例同时运行")
         return 1
+    
+    # 检查是否为系统重启
+    is_restarting = "--restarting" in sys.argv
     
     # 检查并以管理员权限运行
     if check_and_run_as_admin():
@@ -184,6 +277,9 @@ def main() -> int:
         
     if is_admin:
         logger.info("程序已经以管理员权限运行")
+        # 如果是管理员权限且需要管理员权限运行，注册系统重启任务
+        if config.get("general", "run_as_admin", False):
+            register_system_restart()
     
     # 创建应用程序
     app = QApplication(sys.argv)

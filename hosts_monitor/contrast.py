@@ -61,7 +61,7 @@ class ContrastModule:
     
     def _check_hosts_content(self, hosts_content: str, config_hosts_data: str) -> bool:
         """检查hosts文件内容是否完整包含配置数据"""
-        # 获取配置的hosts数据行（忽略空行，但包含"# Hosts Monitor 数据"等特定注释行）
+        # 获取配置的hosts数据行（忽略空行，包含所有注释行）
         config_lines = []
         is_hosts_monitor_data = False
         
@@ -74,8 +74,8 @@ class ContrastModule:
             if "# Hosts Monitor 数据" in stripped_line:
                 is_hosts_monitor_data = True
                 config_lines.append(stripped_line)
-            # 对于其他注释行，如果是在"# Hosts Monitor 数据"部分，也加入到检查中
-            elif stripped_line.startswith('#') and is_hosts_monitor_data:
+            # 所有注释行都加入到检查中，不再限制只检查"# Hosts Monitor 数据"部分的注释
+            elif stripped_line.startswith('#'):
                 config_lines.append(stripped_line)
             # 非注释行正常处理
             elif not stripped_line.startswith('#'):
