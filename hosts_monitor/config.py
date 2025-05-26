@@ -40,6 +40,12 @@ class Config:
                 "delay_time": 3000,  # 默认延迟3000毫秒
                 "minimize_to_tray": True
             },
+            "window": {
+                "width": 550,
+                "height": 750,
+                "pos_x": -1,  # -1 表示居中显示
+                "pos_y": -1
+            },
             "hosts": {
                 "data": "# Hosts Monitor 数据\n127.0.0.1 localhost\n"
             }
