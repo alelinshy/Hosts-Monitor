@@ -108,7 +108,7 @@ class HostsMonitor:
                 "watch_filter": None,  # 不过滤任何事件
                 "stop_event": self.stop_event,
                 "debounce": 500,  # 内部去抖动，单位毫秒
-                "debug": True,  # 启用调试以获取更多信息
+                "debug": False,  # 启用调试以获取更多信息
                 "yield_on_timeout": True,  # 即使没有变化也定期返回，使停止更可靠
             }
             
@@ -181,13 +181,17 @@ class HostsMonitor:
         return self.hosts_path
 
     def set_debounce_time(self, seconds: float) -> None:
-        """设置去抖动时间（秒）"""
+        """设置去抖动时间（秒）
+        
+        参数:
+            seconds: 去抖动时间（秒），通常由毫秒转换而来
+        """
         if seconds <= 0:
             logger.warning(f"去抖动时间必须大于0，设置为默认值2秒")
             self.debounce_time = 2
         else:
             self.debounce_time = seconds
-            logger.info(f"监控去抖动时间已设置为 {self.debounce_time:.2f} 秒")
+            logger.info(f"监控去抖动时间已设置为 {self.debounce_time:.2f} 秒（{self.debounce_time * 1000:.0f}毫秒）")
     
 
 # 全局监控对象

@@ -148,6 +148,12 @@ class RepairModule:
         hosts_lines = hosts_content.splitlines()
         config_lines = config_hosts_data.splitlines()
         
+        # 移除配置数据中的前后空行，稍后会规范化添加
+        while config_lines and not config_lines[0].strip():
+            config_lines.pop(0)
+        while config_lines and not config_lines[-1].strip():
+            config_lines.pop()
+            
         # 查找匹配位置（包含"# Hosts Monitor 数据"等特定注释行）
         match_positions = self._find_match_positions(hosts_lines, config_lines)
         
@@ -156,13 +162,19 @@ class RepairModule:
             # 情况1: 没有匹配项，在末尾添加
             logger.info("本地hosts文件中没有匹配的数据，将在末尾添加")
             
-            # 确保文件末尾有空行
-            if hosts_lines and hosts_lines[-1].strip():
+            # 移除末尾的所有空行，然后添加一个空行
+            while hosts_lines and not hosts_lines[-1].strip():
+                hosts_lines.pop()
+                
+            # 确保文件有内容后添加一个空行
+            if hosts_lines:
                 hosts_lines.append("")
             
-            # 添加空行和配置数据
-            hosts_lines.append("")
+            # 添加配置数据
             hosts_lines.extend(config_lines)
+            
+            # 在配置数据后添加一个空行
+            hosts_lines.append("")
             
         elif len(match_positions) == 1:
             # 情况2: 只有一行匹配，以此为基准点插入
@@ -182,35 +194,57 @@ class RepairModule:
                       hosts_lines[position].strip() and 
                       not hosts_lines[position].strip().startswith('#')):
                     del hosts_lines[position]
+                    
+                # 删除可能存在的多余空行
+                while position < len(hosts_lines) and not hosts_lines[position].strip():
+                    del hosts_lines[position]
             else:
                 # 不是注释行匹配，按原有逻辑处理
                 del hosts_lines[position]
+                
+                # 删除可能存在的多余空行
+                if position < len(hosts_lines) and not hosts_lines[position].strip():
+                    del hosts_lines[position]
             
-            # 在匹配位置插入配置数据
-            # 确保前后有空行
-            if position > 0 and hosts_lines[position-1].strip():
-                hosts_lines.insert(position, "")
+            # 在匹配位置前确保有一个空行（不多不少）
+            if position > 0:
+                # 检查前面是否已有空行
+                if hosts_lines[position-1].strip():
+                    # 如果前面不是空行，添加一个空行
+                    hosts_lines.insert(position, "")
+                    position += 1
+            else:
+                # 在文件开头，直接添加一个空行
+                hosts_lines.insert(0, "")
                 position += 1
                 
+            # 插入配置数据
             for i, line in enumerate(config_lines):
                 hosts_lines.insert(position + i, line)
                 
-            # 添加尾部空行
-            if position + len(config_lines) < len(hosts_lines) and hosts_lines[position + len(config_lines)].strip():
-                hosts_lines.insert(position + len(config_lines), "")
+            # 在配置数据后确保有一个空行（不多不少）
+            new_position = position + len(config_lines)
+            if new_position < len(hosts_lines):
+                # 检查后面是否已有空行
+                if hosts_lines[new_position].strip():
+                    # 如果后面不是空行，添加一个空行
+                    hosts_lines.insert(new_position, "")
+            else:
+                # 已到文件末尾，添加一个空行
+                hosts_lines.append("")
                 
         else:
             # 情况3: 有多行匹配，以第一行为基准，删除其余匹配行
             first_match = match_positions[0]
             logger.info(f"本地hosts文件中有多行匹配的数据，以位置 {first_match} 为基准")
             
-            # 检查第一个匹配是否是"# Hosts Monitor 数据"标记行
-            is_comment_match = hosts_lines[first_match].strip().startswith('#')
-            
             # 删除第一个匹配之后的所有匹配行
             # 从后向前删除，避免索引问题
             for pos in reversed(match_positions[1:]):
                 del hosts_lines[pos]
+            
+            # 检查第一个匹配是否是"# Hosts Monitor 数据"标记行
+            is_comment_match = hosts_lines[first_match].strip().startswith('#')
             
             # 如果是注释行匹配，查找此注释行后的所有连续数据行并删除
             if is_comment_match:
@@ -222,28 +256,51 @@ class RepairModule:
                       hosts_lines[first_match].strip() and 
                       not hosts_lines[first_match].strip().startswith('#')):
                     del hosts_lines[first_match]
+                    
+                # 删除可能存在的多余空行
+                while first_match < len(hosts_lines) and not hosts_lines[first_match].strip():
+                    del hosts_lines[first_match]
             else:
                 # 不是注释行匹配，按原有逻辑处理
                 del hosts_lines[first_match]
+                
+                # 删除可能存在的多余空行
+                if first_match < len(hosts_lines) and not hosts_lines[first_match].strip():
+                    del hosts_lines[first_match]
             
-            # 在第一个匹配位置插入配置数据
-            # 确保前后有空行
-            if first_match > 0 and hosts_lines[first_match-1].strip():
-                hosts_lines.insert(first_match, "")
+            # 在匹配位置前确保有一个空行（不多不少）
+            if first_match > 0:
+                # 检查前面是否已有空行
+                if hosts_lines[first_match-1].strip():
+                    # 如果前面不是空行，添加一个空行
+                    hosts_lines.insert(first_match, "")
+                    first_match += 1
+            else:
+                # 在文件开头，直接添加一个空行
+                hosts_lines.insert(0, "")
                 first_match += 1
                 
+            # 插入配置数据
             for i, line in enumerate(config_lines):
                 hosts_lines.insert(first_match + i, line)
                 
-            # 添加尾部空行
-            if first_match + len(config_lines) < len(hosts_lines) and hosts_lines[first_match + len(config_lines)].strip():
-                hosts_lines.insert(first_match + len(config_lines), "")
+            # 在配置数据后确保有一个空行（不多不少）
+            new_position = first_match + len(config_lines)
+            if new_position < len(hosts_lines):
+                # 检查后面是否已有空行
+                if hosts_lines[new_position].strip():
+                    # 如果后面不是空行，添加一个空行
+                    hosts_lines.insert(new_position, "")
+            else:
+                # 已到文件末尾，添加一个空行
+                hosts_lines.append("")
         
-        # 移除末尾多余的空行
+        # 处理文件末尾：
+        # 1. 移除所有末尾空行
         while hosts_lines and not hosts_lines[-1].strip():
             hosts_lines.pop()
         
-        # 确保文件最后有一个换行符
+        # 2. 确保文件最后有且仅有一个换行符
         hosts_lines.append("")
         
         # 将行组合成文本
@@ -257,12 +314,13 @@ class RepairModule:
         try:
             logger.info("修复模块启动")
             
-            # 获取延迟时间 (毫秒转秒)
-            delay_time = config.get("general", "delay_time", 5) / 1000.0
+            # 获取延迟时间（毫秒）并转换为秒
+            delay_time_ms = config.get("general", "delay_time", 3000)
+            delay_time_sec = delay_time_ms / 1000.0
             
             # 等待延迟时间
-            logger.info(f"等待延迟时间: {delay_time:.2f}秒")
-            time.sleep(delay_time)
+            logger.info(f"等待延迟时间: {delay_time_ms}毫秒 ({delay_time_sec:.2f}秒)")
+            time.sleep(delay_time_sec)
             
             # 获取hosts文件路径
             hosts_path = monitor.get_hosts_path()

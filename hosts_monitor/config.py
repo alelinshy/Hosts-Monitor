@@ -37,7 +37,7 @@ class Config:
             "general": {
                 "auto_start": False,
                 "run_as_admin": False,
-                "delay_time": 5,  # 默认延迟5秒
+                "delay_time": 3000,  # 默认延迟3000毫秒
                 "minimize_to_tray": True
             },
             "hosts": {

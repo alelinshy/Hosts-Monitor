@@ -49,10 +49,10 @@ class HostsMonitorUI(QMainWindow):
         # 监控状态
         self.is_monitoring = False
         
-        # 初始化监控模块的去抖动时间
-        delay_time = config.get("general", "delay_time", 5)
-        debounce_time = delay_time / 1000.0
-        monitor.set_debounce_time(debounce_time)
+        # 初始化监控模块的去抖动时间（毫秒转秒）
+        delay_time_ms = config.get("general", "delay_time", 3000)
+        debounce_time_sec = delay_time_ms / 1000.0
+        monitor.set_debounce_time(debounce_time_sec)
         
         # 系统托盘
         self.setup_tray_icon()
@@ -178,11 +178,11 @@ class HostsMonitorUI(QMainWindow):
         self.manual_check_btn.clicked.connect(self.manual_contrast)
         top_layout.addWidget(self.manual_check_btn)
         
-        top_layout.addWidget(QLabel("延迟时间(ms):"))
+        top_layout.addWidget(QLabel("延迟时间(毫秒):"))
         
         self.delay_edit = QLineEdit()
         self.delay_edit.setFixedWidth(80)
-        self.delay_edit.setText(str(config.get("general", "delay_time", 5)))        
+        self.delay_edit.setText(str(config.get("general", "delay_time", 3000)))        
         self.delay_edit.setValidator(QIntValidator(1, 10000))
         top_layout.addWidget(self.delay_edit)
         
@@ -427,12 +427,12 @@ class HostsMonitorUI(QMainWindow):
     def save_config(self) -> None:
         """保存配置"""
         try:
-            # 获取延迟时间
+            # 获取延迟时间（毫秒）
             try:
                 delay_text = self.delay_edit.text().strip()
                 if not delay_text:
-                    delay_time = 5  # 默认值
-                    logger.warning("延迟时间为空，使用默认值5毫秒")
+                    delay_time = 3000  # 默认值（毫秒）
+                    logger.warning("延迟时间为空，使用默认值3000毫秒")
                 else:
                     delay_time = int(delay_text)
                     if delay_time < 1:
@@ -442,9 +442,9 @@ class HostsMonitorUI(QMainWindow):
                         delay_time = 10000
                         logger.warning("延迟时间大于10000毫秒，已调整为10000毫秒")
             except ValueError as e:
-                logger.error(f"延迟时间格式错误: {str(e)}，使用默认值5毫秒")
-                delay_time = 5
-                QMessageBox.warning(self, "警告", f"延迟时间格式错误，已使用默认值5毫秒")
+                logger.error(f"延迟时间格式错误: {str(e)}，使用默认值3000毫秒")
+                delay_time = 3000
+                QMessageBox.warning(self, "警告", f"延迟时间格式错误，已使用默认值3000毫秒")
             
             # 更新配置
             config.set("general", "delay_time", delay_time)
@@ -509,7 +509,7 @@ class HostsMonitorUI(QMainWindow):
     def apply_delay_time(self) -> None:
         """应用延迟时间设置"""
         try:
-            # 获取延迟时间
+            # 获取延迟时间（毫秒）
             delay_time = int(self.delay_edit.text())
             if delay_time < 1 or delay_time > 10000:
                 raise ValueError("延迟时间必须在1-10000毫秒范围内")
