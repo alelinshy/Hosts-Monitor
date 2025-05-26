@@ -10,6 +10,7 @@ import threading
 import time
 import win32file
 import win32con
+import ctypes
 from typing import List, Tuple, Optional
 
 from . import logger
@@ -314,6 +315,13 @@ class RepairModule:
         try:
             logger.info("修复模块启动")
             
+            # 首先检查软件是否以管理员权限运行
+            if not self._is_admin():
+                logger.error("当前程序没有管理员权限，无法修复hosts文件，修复模块关闭")
+                return
+            
+            logger.info("已验证管理员权限，继续修复流程")
+            
             # 获取延迟时间（毫秒）并转换为秒
             delay_time_ms = config.get("general", "delay_time", 3000)
             delay_time_sec = delay_time_ms / 1000.0
@@ -346,6 +354,14 @@ class RepairModule:
         finally:
             logger.info("修复模块关闭")
     
+    def _is_admin(self) -> bool:
+        """检查是否以管理员权限运行"""
+        try:
+            return ctypes.windll.shell32.IsUserAnAdmin() != 0
+        except Exception as e:
+            logger.error(f"检查管理员权限时出错: {str(e)}")
+            return False
+                
     def start(self) -> None:
         """启动修复模块"""
         if self.repair_thread and self.repair_thread.is_alive():

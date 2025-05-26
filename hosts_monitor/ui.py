@@ -318,8 +318,7 @@ class HostsMonitorUI(QMainWindow):
             # 如果ShellExecuteW返回值大于32表示成功启动
             if ret > 32:
                 logger.info("管理员权限的新实例已启动，当前实例即将退出")
-                # 使用延时确保新进程有时间启动
-                QMessageBox.information(self, "提示", "程序正在以管理员权限重新启动...")
+                # 直接退出当前实例，不显示提示弹窗
                 QTimer.singleShot(1000, QApplication.quit)
             else:
                 error_msg = "未知错误"
