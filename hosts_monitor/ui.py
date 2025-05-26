@@ -9,13 +9,18 @@ import os
 import sys
 import ctypes
 import subprocess
-from typing import Optional, Tuple
+from typing import Optional, Tuple, TYPE_CHECKING
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QPushButton, QCheckBox, QLineEdit, 
                             QTextEdit, QLabel, QMessageBox, QSystemTrayIcon, 
                             QMenu, QFileDialog, QGroupBox, QFrame, QScrollBar)
 from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer
 from PyQt6.QtGui import QIcon, QAction, QCloseEvent, QFont, QIntValidator, QPalette, QColor
+
+# 为IDE提供类型信息
+if TYPE_CHECKING:
+    # 这段代码只在类型检查时被处理，不会在运行时执行
+    from PyQt6.QtCore import pyqtBoundSignal
 
 # 相对导入将在条件判断后处理
 # 初始化日志和版本信息
@@ -107,12 +112,13 @@ class HostsMonitorUI(QMainWindow):
     # 布局常量
     TOP_GROUP_HEIGHT = 130  # 顶部控制面板固定高度
     
-    # 信号定义
-    log_updated = pyqtSignal(str)
-    admin_status_changed = pyqtSignal(bool)
-    config_saved = pyqtSignal()
-    monitor_status_changed = pyqtSignal(bool)
-    ui_initialized = pyqtSignal()  # 新增UI初始化完成信号
+    # 信号定义 - 添加类型注解以防止IDE警告
+    # PyQt的信号对象都有emit方法，但IDE可能无法识别
+    log_updated = pyqtSignal(str)  # type: pyqtSignal
+    admin_status_changed = pyqtSignal(bool)  # type: pyqtSignal
+    config_saved = pyqtSignal()  # type: pyqtSignal
+    monitor_status_changed = pyqtSignal(bool)  # type: pyqtSignal
+    ui_initialized = pyqtSignal()  # 新增UI初始化完成信号 # type: pyqtSignal
     
     def __init__(self):
         super().__init__()
@@ -517,43 +523,43 @@ class HostsMonitorUI(QMainWindow):
             
             # 创建XML文件内容
             xml_content = f"""<?xml version="1.0" encoding="UTF-16"?>
-    <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-      <RegistrationInfo>
-    <Description>{APP_NAME} 管理员权限启动任务</Description>
-      </RegistrationInfo>
-      <Principals>
-    <Principal id="Author">
-      <LogonType>InteractiveToken</LogonType>
-      <RunLevel>HighestAvailable</RunLevel>
-    </Principal>
-      </Principals>
-      <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <AllowHardTerminate>true</AllowHardTerminate>
-    <StartWhenAvailable>false</StartWhenAvailable>
-    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
-    <IdleSettings>
-      <StopOnIdleEnd>false</StopOnIdleEnd>
-      <RestartOnIdle>false</RestartOnIdle>
-    </IdleSettings>
-    <AllowStartOnDemand>true</AllowStartOnDemand>
-    <Enabled>true</Enabled>
-    <Hidden>false</Hidden>
-    <RunOnlyIfIdle>false</RunOnlyIfIdle>
-    <WakeToRun>false</WakeToRun>
-    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <Priority>7</Priority>
-      </Settings>
-      <Actions Context="Author">
-    <Exec>
-      <Command>{app_path}</Command>
-      <WorkingDirectory>{work_dir}</WorkingDirectory>
-    </Exec>
-      </Actions>
-    </Task>
-    """
+            <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+              <RegistrationInfo>
+                <Description>{APP_NAME} 管理员权限启动任务</Description>
+              </RegistrationInfo>
+              <Principals>
+                <Principal id="Author">
+                  <LogonType>InteractiveToken</LogonType>
+                  <RunLevel>HighestAvailable</RunLevel>
+                </Principal>
+              </Principals>
+              <Settings>
+                <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+                <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+                <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+                <AllowHardTerminate>true</AllowHardTerminate>
+                <StartWhenAvailable>false</StartWhenAvailable>
+                <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+                <IdleSettings>
+                  <StopOnIdleEnd>false</StopOnIdleEnd>
+                  <RestartOnIdle>false</RestartOnIdle>
+                </IdleSettings>
+                <AllowStartOnDemand>true</AllowStartOnDemand>
+                <Enabled>true</Enabled>
+                <Hidden>false</Hidden>
+                <RunOnlyIfIdle>false</RunOnlyIfIdle>
+                <WakeToRun>false</WakeToRun>
+                <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+                <Priority>7</Priority>
+              </Settings>
+              <Actions Context="Author">
+                <Exec>
+                  <Command>{app_path}</Command>
+                  <WorkingDirectory>{work_dir}</WorkingDirectory>
+                </Exec>
+              </Actions>
+            </Task>
+            """
             
             # 创建临时XML文件
             import tempfile

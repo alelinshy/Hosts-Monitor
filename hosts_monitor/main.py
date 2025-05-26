@@ -5,6 +5,7 @@
 
 import os
 import sys
+import time
 import ctypes
 import subprocess
 from PyQt6.QtWidgets import QApplication
@@ -55,13 +56,6 @@ def run_as_task() -> bool:
     try:
         # 检查任务是否存在
         if check_task_exists():
-            # 获取当前程序的路径
-            if getattr(sys, 'frozen', False):
-                app_path = sys.executable
-            else:
-                app_path = sys.executable
-                app_args = f'"{os.path.abspath(sys.argv[0])}"'
-            
             # 使用schtasks命令运行任务
             subprocess.Popen(
                 ['schtasks', '/run', '/tn', TASK_NAME],
