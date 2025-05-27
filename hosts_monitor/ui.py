@@ -367,6 +367,10 @@ class HostsMonitorUI(QMainWindow):
         
         # 显示托盘图标
         self.tray_icon.show()
+        
+        # 使用定时器延迟确保托盘图标显示
+        # 解决在某些情况下托盘图标不显示的问题
+        QTimer.singleShot(500, self.tray_icon.show)
     
     def show_main_window(self) -> None:
         """显示主窗口"""
@@ -609,6 +613,7 @@ class HostsMonitorUI(QMainWindow):
         """以管理员权限运行程序"""
         # 导入工具函数
         from .utils import is_admin, create_scheduled_task, run_task, run_as_admin as utils_run_as_admin
+        import os, sys, time
         
         # 检查是否已经是管理员权限
         if is_admin():
@@ -640,10 +645,38 @@ class HostsMonitorUI(QMainWindow):
             # 如果任务计划方式失败，回退到传统的UAC方式
             if not success:
                 logger.warning("任务计划方式失败，尝试UAC提权")
-                # 准备参数
-                app_args = "--already-trying-uac"
+                
+                # 获取程序路径信息
+                from .utils import get_app_paths
+                paths = get_app_paths()
+                
+                # 准备应用程序路径和参数
+                app_path = paths['app_path']
+                if paths['is_frozen']:
+                    # 如果是打包的可执行文件
+                    app_args = "--already-trying-uac"
+                else:
+                    # 如果是Python脚本模式
+                    script_path = paths['script_path']
+                    # 对于Python脚本，确保正确传递脚本路径作为参数
+                    app_args = f'"{script_path}" --already-trying-uac'
+                
+                # 获取工作目录
+                work_dir = paths['app_dir']
+                
+                # 记录详细提权信息
+                logger.info(f"准备以UAC方式提权启动")
+                logger.info(f"应用路径: {app_path}")
+                logger.info(f"应用参数: {app_args}")
+                logger.info(f"工作目录: {work_dir}")
+                
                 # 使用工具函数尝试UAC提权
-                success = utils_run_as_admin(app_args=app_args)
+                success = utils_run_as_admin(
+                    app_path=app_path,
+                    app_args=app_args,
+                    work_dir=work_dir
+                )
+                
                 if success:
                     logger.info("管理员权限的新实例通过UAC启动，当前实例即将退出")
             
@@ -652,15 +685,14 @@ class HostsMonitorUI(QMainWindow):
                 # 关闭系统托盘图标
                 self.tray_icon.hide()
                 
-                # 显示信息
-                QMessageBox.information(
-                    self,
-                    "获取管理员权限",
-                    "正在以管理员权限重新启动程序。\n当前实例将关闭。"
-                )
+                # 给新进程更多时间启动
+                logger.info("等待新实例启动...")
+                # 添加短暂延迟
+                time.sleep(0.5)
                 
-                # 等待一会儿后退出当前实例
-                QTimer.singleShot(1000, QApplication.quit)
+                # 直接退出当前实例，不显示提示弹窗
+                logger.info("即将关闭当前实例，程序将以管理员权限重新启动")
+                QTimer.singleShot(2000, QApplication.quit)
             else:
                 # 提权失败
                 QMessageBox.critical(

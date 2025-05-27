@@ -12,6 +12,8 @@ import sys
 import tempfile
 import winreg
 
+import time
+
 # 从版本模块导入常量
 from .version import APP_NAME
 
@@ -48,6 +50,65 @@ def check_task_exists(task_name=None) -> bool:
     except Exception as e:
         logger.error(f"检查任务计划时发生错误: {str(e)}")
         return False
+        
+        
+def delete_scheduled_task(task_name=None) -> bool:
+    """删除计划任务
+    
+    参数:
+        task_name: 要删除的任务名称，默认使用TASK_NAME
+    
+    返回:
+        bool: 操作是否成功
+    """
+    if task_name is None:
+        task_name = TASK_NAME
+    
+    try:
+        # 首先检查任务是否存在
+        if not check_task_exists(task_name):
+            logger.info(f"任务计划 {task_name} 不存在，无需删除")
+            return True
+            
+        # 使用schtasks命令删除任务
+        logger.info(f"正在删除任务计划: {task_name}")
+        result = subprocess.run(
+            ['schtasks', '/delete', '/tn', task_name, '/f'],
+            capture_output=True,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        
+        if result.returncode == 0:
+            logger.info(f"已成功删除任务计划: {task_name}")
+            return True
+        else:
+            logger.error(f"删除任务计划失败: {result.stderr.strip()}")
+            return False
+    except Exception as e:
+        logger.error(f"删除任务计划过程中发生错误: {str(e)}")
+        return False
+
+
+def clean_up_admin_tasks() -> None:
+    """清理管理员任务相关资源
+    当程序退出时应调用此函数，确保不留下任务计划
+    """
+    try:
+        # 如果配置了run_as_admin且已是管理员，则可以保留任务
+        from .config import config
+        if config.get("general", "run_as_admin", False) and is_admin():
+            # 仅在配置了管理员权限且当前是管理员权限运行时保留任务
+            logger.info("保留管理员权限任务计划以供下次使用")
+            return
+            
+        # 其他情况删除任务计划，避免影响下次普通启动
+        if delete_scheduled_task():
+            logger.info("已清理管理员任务计划")
+        else:
+            logger.warning("清理管理员任务计划失败，可能会影响下次启动")
+    except Exception as e:
+        logger.error(f"清理管理员任务时出错: {str(e)}")
 
 
 def get_app_paths():
@@ -85,8 +146,17 @@ def create_task_xml(executable_path, args="", add_restart_param=False, user_id=N
         username = getpass.getuser()
         user_id = f"{domain}\\{username}" if domain else username
     
-    # 工作目录
-    working_dir = os.path.dirname(executable_path)
+    # 工作目录 - 获取绝对路径，避免相对路径问题
+    working_dir = os.path.abspath(os.path.dirname(executable_path))
+    
+    # 处理可执行文件路径 - 确保使用绝对路径
+    executable_path = os.path.abspath(executable_path)
+
+    # 记录详细配置信息
+    logger.info(f"任务计划配置 - 可执行文件: {executable_path}")
+    logger.info(f"任务计划配置 - 参数: {args}")
+    logger.info(f"任务计划配置 - 工作目录: {working_dir}")
+    logger.info(f"任务计划配置 - 用户: {user_id}")
 
     # 创建任务XML
     xml = f"""<?xml version="1.0" encoding="UTF-16"?>
@@ -148,6 +218,8 @@ def create_scheduled_task(task_name=None, xml_content=None, executable_path=None
     返回:
         bool: 操作是否成功
     """
+    import traceback
+    
     if task_name is None:
         task_name = TASK_NAME
         
@@ -159,7 +231,12 @@ def create_scheduled_task(task_name=None, xml_content=None, executable_path=None
                 paths = get_app_paths()
                 executable_path = paths['app_path'] if paths['is_frozen'] else sys.executable
                 if not paths['is_frozen'] and not args:
-                    args = f'"{paths["script_path"]}"'
+                    # 对于Python脚本，确保路径正确传递
+                    script_path = paths['script_path']
+                    args = f'"{script_path}"'
+                
+                logger.info(f"任务配置 - 可执行文件: {executable_path}")
+                logger.info(f"任务配置 - 参数: {args}")
                     
             # 生成XML内容
             xml_content = create_task_xml(
@@ -169,9 +246,11 @@ def create_scheduled_task(task_name=None, xml_content=None, executable_path=None
             )
         
         # 创建临时XML文件
+        temp_xml_path = None
         with tempfile.NamedTemporaryFile(suffix='.xml', delete=False, mode='w', encoding='utf-16') as temp:
             temp_xml_path = temp.name
             temp.write(xml_content)
+            logger.info(f"已创建临时XML文件: {temp_xml_path}")
         
         # 使用schtasks创建任务
         logger.info(f"正在创建管理员权限任务计划: {task_name}")
@@ -184,25 +263,43 @@ def create_scheduled_task(task_name=None, xml_content=None, executable_path=None
         
         # 删除临时文件
         try:
-            os.unlink(temp_xml_path)
+            if temp_xml_path and os.path.exists(temp_xml_path):
+                os.unlink(temp_xml_path)
+                logger.info(f"已删除临时XML文件: {temp_xml_path}")
         except Exception as e:
             logger.warning(f"删除临时XML文件失败: {str(e)}")
         
         # 检查结果
         if result.returncode != 0:
             logger.error(f"创建任务计划失败: {result.stderr.strip()}")
+            # 输出完整的命令行和返回值以便调试
+            logger.error(f"命令行: schtasks /create /tn {task_name} /xml {temp_xml_path} /f")
+            logger.error(f"返回代码: {result.returncode}")
+            logger.error(f"标准输出: {result.stdout.strip()}")
             return False
             
         logger.info(f"管理员权限任务计划创建成功")
-        return True
+        
+        # 确认任务是否真的存在
+        if check_task_exists(task_name):
+            logger.info(f"已确认任务计划 {task_name} 存在")
+            return True
+        else:
+            logger.error(f"任务计划创建后无法找到: {task_name}")
+            return False
     except Exception as e:
+        # 获取详细的异常信息
+        exc_info = traceback.format_exc()
         logger.error(f"创建管理员权限任务计划过程中发生错误: {str(e)}")
+        logger.error(f"详细异常信息: {exc_info}")
+        
         # 确保删除临时文件
-        if 'temp_xml_path' in locals() and os.path.exists(temp_xml_path):
+        if 'temp_xml_path' in locals() and temp_xml_path and os.path.exists(temp_xml_path):
             try:
                 os.unlink(temp_xml_path)
-            except:
-                pass
+                logger.info(f"已删除临时XML文件: {temp_xml_path}")
+            except Exception as clean_err:
+                logger.warning(f"清理临时文件时出错: {str(clean_err)}")
         return False
 
 
@@ -217,14 +314,23 @@ def run_task(task_name=None):
             logger.warning(f"任务计划不存在: {task_name}")
             return False
             
-        # 运行任务
-        subprocess.Popen(
+        # 使用subprocess.run阻塞方式运行任务，确保任务已启动
+        result = subprocess.run(
             ['schtasks', '/run', '/tn', task_name],
+            capture_output=True,
+            text=True,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
         
-        logger.info(f"已启动任务计划: {task_name}")
-        return True
+        # 检查启动结果
+        if result.returncode == 0:
+            logger.info(f"已启动任务计划: {task_name}")
+            # 等待一段时间，确保任务有足够时间启动
+            time.sleep(1.5)
+            return True
+        else:
+            logger.error(f"启动任务计划失败: {result.stderr.strip()}")
+            return False
     except Exception as e:
         logger.error(f"运行任务计划失败: {str(e)}")
         return False
@@ -242,27 +348,44 @@ def run_as_admin(app_path=None, app_args=None, work_dir=None):
     返回:
         bool: 是否成功启动
     """
+    # 导入必要的模块
+    import os
+    import sys
+    import time
+    import ctypes
+    import traceback
+    
     try:
         # 如果未提供参数，则获取当前程序信息
-        if app_path is None or app_args is None or work_dir is None:
-            paths = get_app_paths()
-            
-            if app_path is None:
-                app_path = paths['app_path']
-                
-            if app_args is None:
-                if paths['is_frozen']:
-                    app_args = ""
-                else:
-                    app_args = f'"{paths["script_path"]}"'
-            
-            if work_dir is None:
-                work_dir = paths['app_dir']
+        paths = get_app_paths()
         
-        logger.info(f"尝试以管理员权限运行: {app_path} {app_args}")
+        if app_path is None:
+            app_path = paths['app_path']
+            
+        if app_args is None:
+            if paths['is_frozen']:
+                app_args = ""
+            else:
+                # 确保脚本路径正确传递
+                app_args = f'"{paths["script_path"]}"'
+        
+        if work_dir is None:
+            work_dir = paths['app_dir']
+        
+        # 记录详细的启动信息以便调试
+        logger.info(f"===== 提权启动详细信息 =====")
+        logger.info(f"应用路径: {app_path}")
+        logger.info(f"应用参数: {app_args}")
         logger.info(f"工作目录: {work_dir}")
+        logger.info(f"是否打包: {paths['is_frozen']}")
         
+        # 确保路径存在
+        if not os.path.exists(app_path):
+            logger.error(f"应用程序路径不存在: {app_path}")
+            return False
+            
         # 以管理员权限启动 - 直接使用系统UAC弹窗，无需额外确认
+        # 注意：某些情况下参数可能需要特殊处理，特别是包含空格的路径
         ret = ctypes.windll.shell32.ShellExecuteW(
             None, "runas", app_path, app_args, work_dir, 1
         )
@@ -270,6 +393,8 @@ def run_as_admin(app_path=None, app_args=None, work_dir=None):
         # 如果ShellExecuteW返回值大于32表示成功
         if ret > 32:
             logger.info("已成功请求管理员权限，程序将以管理员权限重新启动")
+            # 添加短暂延迟，确保新进程有足够时间启动
+            time.sleep(0.5)
             return True
         else:
             error_codes = {
@@ -288,21 +413,25 @@ def run_as_admin(app_path=None, app_args=None, work_dir=None):
                 32: "操作已取消"
             }
             
-            error_msg = error_codes.get(ret, "未知错误")
+            error_msg = error_codes.get(ret, f"未知错误代码: {ret}")
             logger.error(f"请求管理员权限失败，返回值: {ret}，错误: {error_msg}")
             return False
     except Exception as e:
+        # 获取详细的异常信息
+        exc_info = traceback.format_exc()
         logger.error(f"以管理员权限启动失败: {str(e)}")
+        logger.error(f"详细异常信息: {exc_info}")
         return False
 
 
-def set_autostart(enable=True, restart_param=False):
+def set_autostart(enable=True, restart_param=False, update_config=True):
     """
     设置程序开机自启动
     
     参数:
         enable: 是否启用开机自启动
         restart_param: 是否添加重启参数
+        update_config: 是否同步更新配置文件
         
     返回:
         bool: 操作是否成功
@@ -361,6 +490,18 @@ def set_autostart(enable=True, restart_param=False):
                 logger.info("开机自启动项不存在，无需删除")
         
         winreg.CloseKey(key)
+        
+        # 同步更新配置文件
+        if update_config:
+            try:
+                from .config import config
+                config.set("general", "auto_start", enable)
+                config.save_config()
+                logger.info(f"已将配置中的开机自启动设置更新为: {enable}")
+            except Exception as config_e:
+                logger.error(f"更新配置文件的开机自启动设置失败: {str(config_e)}")
+                # 注意：即使配置更新失败，我们仍然认为注册表操作成功
+        
         return True
     except Exception as e:
         logger.error(f"设置开机自启动失败: {str(e)}")
@@ -405,6 +546,43 @@ def check_autostart():
         return False
     except Exception as e:
         logger.error(f"检查开机自启动设置失败: {str(e)}")
+        return False
+
+
+def sync_autostart_state():
+    """
+    同步开机自启动的配置状态和系统实际状态
+    
+    此函数确保配置文件中的auto_start设置与系统注册表中的设置一致
+    
+    返回:
+        bool: 操作是否成功
+    """
+    try:
+        # 获取系统实际自启动状态
+        system_autostart = check_autostart()
+        
+        # 获取配置中的自启动状态
+        from .config import config
+        config_autostart = config.get("general", "auto_start", False)
+        
+        # 如果两者不一致，则同步
+        if system_autostart != config_autostart:
+            logger.info(f"开机自启动状态不一致 - 系统: {system_autostart}, 配置: {config_autostart}")
+            
+            # 以系统实际状态为准
+            if config.set("general", "auto_start", system_autostart):
+                config.save_config()
+                logger.info(f"已将配置中的开机自启动设置更新为系统实际状态: {system_autostart}")
+                return True
+            else:
+                logger.error("更新配置中的开机自启动设置失败")
+                return False
+        
+        logger.info(f"开机自启动状态已同步 - 系统: {system_autostart}, 配置: {config_autostart}")
+        return True
+    except Exception as e:
+        logger.error(f"同步开机自启动状态失败: {str(e)}")
         return False
 
 

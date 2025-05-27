@@ -74,6 +74,12 @@ class Controller:
             if not self.ui.tray_icon.isVisible():
                 logger.info("确保托盘图标可见")
                 self.ui.tray_icon.show()
+                
+                # 在某些情况下，单次调用show()可能不足以使图标显示
+                # 增加额外的尝试以确保图标显示
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(500, self.ui.tray_icon.show)
+                QTimer.singleShot(1500, self.ui.tray_icon.show)
     
     def setup_connections(self) -> None:
         """设置模块之间的连接"""
@@ -96,11 +102,20 @@ class Controller:
         # 启动监控
         self.start_monitor()
         
-        # 如果是开机自启，确保托盘图标显示
+        # 无论是否开机自启，都确保托盘图标显示
+        # 特别是在管理员权限提升后重启的情况
+        self.ensure_tray_icon_visible()
+        
+        # 如果是开机自启，则最小化窗口
         if self._should_minimize_on_startup():
-            self.ensure_tray_icon_visible()
+            self.ui.hide()
         
         logger.info("UI初始化完成，已启动监控服务")
+        
+        # 使用定时器延迟再次确保托盘图标显示
+        # 解决某些情况下提权重启后托盘图标不显示的问题
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(2000, self.ensure_tray_icon_visible)
     
     def start_monitor(self) -> None:
         """启动监控服务"""

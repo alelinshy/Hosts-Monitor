@@ -35,9 +35,12 @@ class Config:
         # 默认配置
         self.default_config = {
             "general": {
+                # 是否开机自启动。true：随系统启动，false：不自动启动
                 "auto_start": False,
+                # 是否以管理员权限运行程序。true：始终以管理员权限运行
                 "run_as_admin": False,
                 "delay_time": 3000,  # 默认延迟3000毫秒
+                # 是否启动后最小化到系统托盘。true：最小化，false：显示主窗口
                 "minimize_to_tray": True
             },
             "window": {
