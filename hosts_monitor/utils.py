@@ -262,7 +262,7 @@ def run_as_admin(app_path=None, app_args=None, work_dir=None):
         logger.info(f"尝试以管理员权限运行: {app_path} {app_args}")
         logger.info(f"工作目录: {work_dir}")
         
-        # 以管理员权限启动
+        # 以管理员权限启动 - 直接使用系统UAC弹窗，无需额外确认
         ret = ctypes.windll.shell32.ShellExecuteW(
             None, "runas", app_path, app_args, work_dir, 1
         )

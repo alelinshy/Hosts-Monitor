@@ -110,7 +110,7 @@ def check_and_run_as_admin() -> bool:
             if is_restarting:
                 app_args += " --restarting"
             
-            # 使用工具函数以管理员权限运行
+            # 直接使用工具函数以管理员权限运行，依赖系统UAC弹窗进行确认
             if run_as_admin(app_args=app_args):
                 # 让原进程停留片刻以确保新进程有时间启动
                 time.sleep(1)

@@ -3,6 +3,6 @@
 版本号定义模块
 """
 
-VERSION = "1.2.1"
+VERSION = "1.3.1"
 APP_NAME = "Hosts Monitor"
 APP_AUTHOR = "Hosts Monitor Team"
