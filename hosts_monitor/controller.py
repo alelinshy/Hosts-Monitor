@@ -46,6 +46,13 @@ class Controller:
         
         # 显示UI（根据配置决定是否最小化）
         if self._should_minimize_on_startup():
+            # 先确保UI完全初始化
+            self.ui.show()
+            # 然后最小化到托盘
+            self.ui.hide()
+            # 确保托盘图标可见
+            if hasattr(self.ui, 'tray_icon'):
+                self.ui.tray_icon.show()
             logger.info("程序已启动并自动最小化到系统托盘")
         else:
             self.ui.show()
@@ -54,7 +61,19 @@ class Controller:
     def _should_minimize_on_startup(self) -> bool:
         """是否在启动时最小化到托盘"""
         # 当设置为开机自启动时，默认最小化到托盘
-        return config.get("general", "auto_start", False)
+        minimize = config.get("general", "auto_start", False)
+        if minimize:
+            # 确保系统托盘图标显示
+            self.ensure_tray_icon_visible()
+        return minimize
+        
+    def ensure_tray_icon_visible(self) -> None:
+        """确保系统托盘图标可见"""
+        if self.ui and hasattr(self.ui, 'tray_icon'):
+            # 确保托盘图标已创建并可见
+            if not self.ui.tray_icon.isVisible():
+                logger.info("确保托盘图标可见")
+                self.ui.tray_icon.show()
     
     def setup_connections(self) -> None:
         """设置模块之间的连接"""
@@ -76,6 +95,10 @@ class Controller:
         
         # 启动监控
         self.start_monitor()
+        
+        # 如果是开机自启，确保托盘图标显示
+        if self._should_minimize_on_startup():
+            self.ensure_tray_icon_visible()
         
         logger.info("UI初始化完成，已启动监控服务")
     
