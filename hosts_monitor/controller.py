@@ -4,16 +4,12 @@ UI控制器模块
 - 处理UI与业务逻辑的交互事件
 """
 
-import sys
-import time
 import atexit
-from typing import Optional, List, Dict, Any
 
 from . import logger
-from .version import APP_NAME, VERSION
 from .config import config
-from .monitor import monitor
 from .contrast import contrast_module
+from .monitor import monitor
 from .repair import repair_module
 from .ui import HostsMonitorUI
 

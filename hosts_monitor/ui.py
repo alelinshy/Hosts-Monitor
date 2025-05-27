@@ -7,20 +7,30 @@ UI模块
 
 import os
 import sys
-import ctypes
-import subprocess
-from typing import Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QPushButton, QCheckBox, QLineEdit, 
                             QTextEdit, QLabel, QMessageBox, QSystemTrayIcon, 
-                            QMenu, QFileDialog, QGroupBox, QFrame, QScrollBar)
-from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer
-from PyQt6.QtGui import QIcon, QAction, QCloseEvent, QFont, QIntValidator, QPalette, QColor
+                            QMenu, QGroupBox, QFrame)
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtCore import QObject  # 用于信号的类型注解
+from PyQt6.QtGui import QIcon, QAction, QCloseEvent, QResizeEvent, QMoveEvent, QShowEvent, QFont, QIntValidator, QPalette, QColor
+
+# 添加 QAction.triggered 信号的类型提示
+if TYPE_CHECKING:
+    QAction.triggered = PyQtSignalInstance()  # type: ignore
 
 # 为IDE提供类型信息
 if TYPE_CHECKING:
     # 这段代码只在类型检查时被处理，不会在运行时执行
-    from PyQt6.QtCore import pyqtBoundSignal
+    from PyQt6.QtCore import pyqtBoundSignal, pyqtSignal as PyQtSignal
+    from typing import Callable, Any
+    
+    # 为QAction.triggered创建类型别名
+    class PyQtSignalInstance:
+        def connect(self, slot: Callable[..., Any]) -> None: ...
+        def disconnect(self, slot: Callable[..., Any] = None) -> None: ...
+        def emit(self, *args) -> None: ...
 
 # 相对导入将在条件判断后处理
 # 初始化日志和版本信息
@@ -112,13 +122,73 @@ class HostsMonitorUI(QMainWindow):
     # 布局常量
     TOP_GROUP_HEIGHT = 130  # 顶部控制面板固定高度
     
-    # 信号定义 - 添加类型注解以防止IDE警告
-    # PyQt的信号对象都有emit方法，但IDE可能无法识别
-    log_updated = pyqtSignal(str)  # type: pyqtSignal
-    admin_status_changed = pyqtSignal(bool)  # type: pyqtSignal
-    config_saved = pyqtSignal()  # type: pyqtSignal
-    monitor_status_changed = pyqtSignal(bool)  # type: pyqtSignal
-    ui_initialized = pyqtSignal()  # 新增UI初始化完成信号 # type: pyqtSignal
+    # 样式常量
+    STYLE_GROUP_BOX = (
+        "QGroupBox { font-weight: bold; border: 1px solid #cccccc; border-radius: 6px; margin-top: 10px; } "
+        "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }"
+    )
+    
+    STYLE_TITLE_LABEL = "font-weight: bold; color: #444444;"
+    
+    STYLE_NORMAL_BUTTON = (
+        "QPushButton { background-color: #f0f0f0; border: 1px solid #cccccc; border-radius: 4px; padding: 5px; } "
+        "QPushButton:hover { background-color: #e6e6e6; } "
+        "QPushButton:pressed { background-color: #d9d9d9; }"
+    )
+    
+    STYLE_PRIMARY_BUTTON = (
+        "QPushButton { background-color: #0078d7; color: white; border-radius: 4px; padding: 5px; } "
+        "QPushButton:hover { background-color: #1084e0; } "
+        "QPushButton:pressed { background-color: #005fa1; } "
+        "QPushButton:disabled { background-color: #88b7df; }"
+    )
+    
+    STYLE_SUCCESS_BUTTON = (
+        "QPushButton { background-color: #5cb85c; color: white; border-radius: 4px; padding: 5px; } "
+        "QPushButton:hover { background-color: #4cae4c; } "
+        "QPushButton:pressed { background-color: #3d8b3d; }"
+    )
+    
+    STYLE_STATUS_LABEL = "padding: 5px; border: 1px solid #cccccc; border-radius: 4px; background-color: #f9f9f9;"
+    
+    STYLE_EDIT_BOX = "border: 1px solid #cccccc; border-radius: 4px; padding: 3px;"
+    
+    # 信号定义
+    if TYPE_CHECKING:
+        log_updated: PyQtSignal
+        admin_status_changed: PyQtSignal
+        config_saved: PyQtSignal
+        monitor_status_changed: PyQtSignal
+        ui_initialized: PyQtSignal
+    else:
+        log_updated = pyqtSignal(str)
+        admin_status_changed = pyqtSignal(bool)
+        config_saved = pyqtSignal()
+        monitor_status_changed = pyqtSignal(bool)
+        ui_initialized = pyqtSignal()  # 新增UI初始化完成信号
+    
+    def apply_status_style(self, widget, is_active: bool) -> None:
+        """应用状态样式到控件"""
+        if is_active:
+            widget.setStyleSheet(
+                "padding: 5px; border: 1px solid #c3e6cb; "
+                "border-radius: 4px; background-color: #d4edda; "
+                "color: #155724; font-weight: bold;"
+            )
+        else:
+            widget.setStyleSheet(
+                "padding: 5px; border: 1px solid #f5c6cb; "
+                "border-radius: 4px; background-color: #f8d7da; "
+                "color: #721c24; font-weight: bold;"
+            )
+            
+    def create_vertical_separator(self) -> QFrame:
+        """创建垂直分隔线"""
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.VLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        separator.setStyleSheet("background-color: #cccccc;")
+        return separator
     
     def __init__(self):
         super().__init__()
@@ -267,17 +337,29 @@ class HostsMonitorUI(QMainWindow):
                                "QMenu::item:selected { background-color: #e6f2ff; }")
         
         show_action = QAction(QIcon(self.icon_path), "显示主窗口", self)
-        show_action.triggered.connect(self.show_main_window)
+        # 使用cast消除类型检查警告
+        if TYPE_CHECKING:
+            cast(PyQtSignalInstance, show_action.triggered).connect(self.show_main_window)
+        else:
+            show_action.triggered.connect(self.show_main_window)
         tray_menu.addAction(show_action)
         
         manual_check_action = QAction("手动对比", self)
-        manual_check_action.triggered.connect(self.manual_contrast)
+        # 使用cast消除类型检查警告
+        if TYPE_CHECKING:
+            cast(PyQtSignalInstance, manual_check_action.triggered).connect(self.manual_contrast)
+        else:
+            manual_check_action.triggered.connect(self.manual_contrast)
         tray_menu.addAction(manual_check_action)
         
         tray_menu.addSeparator()
         
         exit_action = QAction("退出", self)
-        exit_action.triggered.connect(self.quit_application)
+        # 使用cast消除类型检查警告
+        if TYPE_CHECKING:
+            cast(PyQtSignalInstance, exit_action.triggered).connect(self.quit_application)
+        else:
+            exit_action.triggered.connect(self.quit_application)
         tray_menu.addAction(exit_action)
         
         self.tray_icon.setContextMenu(tray_menu)
@@ -292,7 +374,7 @@ class HostsMonitorUI(QMainWindow):
         self.raise_()
         self.activateWindow()
     
-    def tray_icon_activated(self, reason):
+    def tray_icon_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         """托盘图标被激活"""
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.show_main_window()
@@ -311,8 +393,7 @@ class HostsMonitorUI(QMainWindow):
         # 上栏 - 控制面板
         top_group = QGroupBox("控制面板")
         top_group.setObjectName("topGroup")
-        top_group.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #cccccc; border-radius: 6px; margin-top: 10px; } "
-                               "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }")
+        top_group.setStyleSheet(self.STYLE_GROUP_BOX)
         top_layout = QVBoxLayout(top_group)
         top_layout.setContentsMargins(10, 20, 10, 10)
         
@@ -323,72 +404,81 @@ class HostsMonitorUI(QMainWindow):
         admin_layout = QVBoxLayout()
         admin_layout.setSpacing(5)
         admin_title = QLabel("权限控制")
-        admin_title.setStyleSheet("font-weight: bold; color: #444444;")
+        admin_title.setStyleSheet(self.STYLE_TITLE_LABEL)
         admin_layout.addWidget(admin_title)
         
         self.admin_btn = QPushButton("以管理员权限运行")
         self.admin_btn.setMinimumWidth(150)
-        self.admin_btn.setStyleSheet("QPushButton { background-color: #0078d7; color: white; border-radius: 4px; padding: 5px; } "
-                                    "QPushButton:hover { background-color: #1084e0; } "
-                                    "QPushButton:pressed { background-color: #005fa1; } "
-                                    "QPushButton:disabled { background-color: #88b7df; }")
-        self.admin_btn.clicked.connect(self.run_as_admin)
+        self.admin_btn.setStyleSheet(self.STYLE_PRIMARY_BUTTON)
+        # 使用cast消除类型检查警告
+        if TYPE_CHECKING:
+            cast(PyQtSignalInstance, self.admin_btn.clicked).connect(self.run_as_admin)
+        else:
+            self.admin_btn.clicked.connect(self.run_as_admin)
         admin_layout.addWidget(self.admin_btn)
         
+        # 导入工具函数检查自启动状态
+        try:
+            from .utils import check_autostart
+            autostart_status = check_autostart()
+        except Exception as e:
+            logger.error(f"检查开机自启状态失败: {str(e)}")
+            autostart_status = config.get("general", "auto_start", False)
+            
         self.autostart_cb = QCheckBox("开机自启")
-        self.autostart_cb.setChecked(config.get("general", "auto_start", False))
-        self.autostart_cb.stateChanged.connect(self.toggle_autostart)
+        self.autostart_cb.setChecked(autostart_status)
+        # 使用cast消除类型检查警告
+        if TYPE_CHECKING:
+            cast(PyQtSignalInstance, self.autostart_cb.stateChanged).connect(self.toggle_autostart)
+        else:
+            self.autostart_cb.stateChanged.connect(self.toggle_autostart)
         admin_layout.addWidget(self.autostart_cb)
         top_row1.addLayout(admin_layout)
         
         # 分隔线
-        separator1 = QFrame()
-        separator1.setFrameShape(QFrame.Shape.VLine)
-        separator1.setFrameShadow(QFrame.Shadow.Sunken)
-        separator1.setStyleSheet("background-color: #cccccc;")
-        top_row1.addWidget(separator1)
+        top_row1.addWidget(self.create_vertical_separator())
         
         # 文件操作
         file_layout = QVBoxLayout()
         file_layout.setSpacing(5)
         file_title = QLabel("文件操作")
-        file_title.setStyleSheet("font-weight: bold; color: #444444;")
+        file_title.setStyleSheet(self.STYLE_TITLE_LABEL)
         file_layout.addWidget(file_title)
         
         self.open_hosts_btn = QPushButton("打开hosts文件")
-        self.open_hosts_btn.setStyleSheet("QPushButton { background-color: #f0f0f0; border: 1px solid #cccccc; border-radius: 4px; padding: 5px; } "
-                                         "QPushButton:hover { background-color: #e6e6e6; } "
-                                         "QPushButton:pressed { background-color: #d9d9d9; }")
-        self.open_hosts_btn.clicked.connect(self.open_hosts_file)
+        self.open_hosts_btn.setStyleSheet(self.STYLE_NORMAL_BUTTON)
+        # 使用cast消除类型检查警告
+        if TYPE_CHECKING:
+            cast(PyQtSignalInstance, self.open_hosts_btn.clicked).connect(self.open_hosts_file)
+        else:
+            self.open_hosts_btn.clicked.connect(self.open_hosts_file)
         file_layout.addWidget(self.open_hosts_btn)
         
         # 监控状态指示
         self.monitor_status_label = QLabel("监控状态: 未知")
-        self.monitor_status_label.setStyleSheet("padding: 5px; border: 1px solid #cccccc; border-radius: 4px; background-color: #f9f9f9;")
+        self.monitor_status_label.setStyleSheet(self.STYLE_STATUS_LABEL)
         file_layout.addWidget(self.monitor_status_label)
         
         top_row1.addLayout(file_layout)
         
         # 分隔线
-        separator2 = QFrame()
-        separator2.setFrameShape(QFrame.Shape.VLine)
-        separator2.setFrameShadow(QFrame.Shadow.Sunken)
-        separator2.setStyleSheet("background-color: #cccccc;")
-        top_row1.addWidget(separator2)
+        top_row1.addWidget(self.create_vertical_separator())
         
         # 操作和设置
         operation_layout = QVBoxLayout()
         operation_layout.setSpacing(5)
         operation_title = QLabel("操作与设置")
-        operation_title.setStyleSheet("font-weight: bold; color: #444444;")
+        operation_title.setStyleSheet(self.STYLE_TITLE_LABEL)
         operation_layout.addWidget(operation_title)
         
         # 手动对比按钮
         self.manual_check_btn = QPushButton("手动对比")
-        self.manual_check_btn.setStyleSheet("QPushButton { background-color: #5cb85c; color: white; border-radius: 4px; padding: 5px; } "
-                                           "QPushButton:hover { background-color: #4cae4c; } "
-                                           "QPushButton:pressed { background-color: #3d8b3d; }")
-        self.manual_check_btn.clicked.connect(self.manual_contrast)
+        self.manual_check_btn.setStyleSheet(self.STYLE_SUCCESS_BUTTON)
+        # 使用cast消除类型检查警告
+        if TYPE_CHECKING:
+            cast(PyQtSignalInstance, self.manual_check_btn.clicked).connect(self.manual_contrast)
+        else:
+            self.manual_check_btn.clicked.connect(self.manual_contrast)
         operation_layout.addWidget(self.manual_check_btn)
         
         # 延迟设置
@@ -397,17 +487,19 @@ class HostsMonitorUI(QMainWindow):
         
         self.delay_edit = QLineEdit()
         self.delay_edit.setFixedWidth(80)
-        self.delay_edit.setStyleSheet("border: 1px solid #cccccc; border-radius: 4px; padding: 3px;")
+        self.delay_edit.setStyleSheet(self.STYLE_EDIT_BOX)
         self.delay_edit.setText(str(config.get("general", "delay_time", 3000)))
         self.delay_edit.setValidator(QIntValidator(1, 10000))
         delay_layout.addWidget(self.delay_edit)
         
         self.apply_delay_btn = QPushButton("应用")
         self.apply_delay_btn.setToolTip("应用延迟时间设置")
-        self.apply_delay_btn.setStyleSheet("QPushButton { background-color: #f0f0f0; border: 1px solid #cccccc; border-radius: 4px; padding: 3px; } "
-                                          "QPushButton:hover { background-color: #e6e6e6; } "
-                                          "QPushButton:pressed { background-color: #d9d9d9; }")
-        self.apply_delay_btn.clicked.connect(self.apply_delay_time)
+        self.apply_delay_btn.setStyleSheet(self.STYLE_NORMAL_BUTTON)
+        # 使用cast消除类型检查警告
+        if TYPE_CHECKING:
+            cast(PyQtSignalInstance, self.apply_delay_btn.clicked).connect(self.apply_delay_time)
+        else:
+            self.apply_delay_btn.clicked.connect(self.apply_delay_time)
         delay_layout.addWidget(self.apply_delay_btn)
         
         operation_layout.addLayout(delay_layout)
@@ -424,8 +516,7 @@ class HostsMonitorUI(QMainWindow):
         # 中栏 - hosts数据
         middle_group = QGroupBox("Hosts数据配置")
         middle_group.setObjectName("middleGroup")
-        middle_group.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #cccccc; border-radius: 6px; margin-top: 10px; } "
-                                  "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }")
+        middle_group.setStyleSheet(self.STYLE_GROUP_BOX)
         middle_layout = QVBoxLayout(middle_group)
         middle_layout.setContentsMargins(10, 20, 10, 10)
         
@@ -441,10 +532,12 @@ class HostsMonitorUI(QMainWindow):
         
         self.save_btn = QPushButton("保存配置")
         self.save_btn.setMinimumWidth(120)
-        self.save_btn.setStyleSheet("QPushButton { background-color: #0078d7; color: white; border-radius: 4px; padding: 6px; font-weight: bold; } "
-                                   "QPushButton:hover { background-color: #1084e0; } "
-                                   "QPushButton:pressed { background-color: #005fa1; }")
-        self.save_btn.clicked.connect(self.save_config)
+        self.save_btn.setStyleSheet(self.STYLE_PRIMARY_BUTTON)
+        # 使用cast消除类型检查警告
+        if TYPE_CHECKING:
+            cast(PyQtSignalInstance, self.save_btn.clicked).connect(self.save_config)
+        else:
+            self.save_btn.clicked.connect(self.save_config)
         save_layout.addWidget(self.save_btn)
         
         middle_layout.addLayout(save_layout)
@@ -454,8 +547,7 @@ class HostsMonitorUI(QMainWindow):
         # 下栏 - 日志
         bottom_group = QGroupBox("运行日志")
         bottom_group.setObjectName("bottomGroup")
-        bottom_group.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #cccccc; border-radius: 6px; margin-top: 10px; } "
-                                  "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }")
+        bottom_group.setStyleSheet(self.STYLE_GROUP_BOX)
         bottom_layout = QVBoxLayout(bottom_group)
         bottom_layout.setContentsMargins(10, 20, 10, 10)
         
@@ -494,8 +586,11 @@ class HostsMonitorUI(QMainWindow):
     def is_admin(self) -> bool:
         """检查是否具有管理员权限"""
         try:
-            return ctypes.windll.shell32.IsUserAnAdmin() != 0
-        except:
+            # 使用utils模块中的函数
+            from .utils import is_admin as utils_is_admin
+            return utils_is_admin()
+        except Exception as e:
+            logger.error(f"检查管理员权限时出错: {str(e)}")
             return False
     def update_admin_button(self, is_admin: bool) -> None:
         """更新管理员按钮状态"""
@@ -508,111 +603,22 @@ class HostsMonitorUI(QMainWindow):
             self.admin_btn.setEnabled(True)
             logger.info("当前程序没有管理员权限")
             
-    def create_admin_task(self, add_restart_param=False) -> bool:
-        """创建管理员权限的任务计划
-        
-        Args:
-            add_restart_param: 是否添加重启参数，用于开机自动启动时
-        """
-        try:
-            # 获取程序完整路径
-            if getattr(sys, 'frozen', False):
-                app_path = sys.executable
-                # 如果需要添加重启参数
-                app_args = "--restarting" if add_restart_param else ""
-            else:
-                # 对于脚本，使用Python解释器启动
-                app_path = sys.executable
-                if add_restart_param:
-                    app_args = f'"{os.path.abspath(sys.argv[0])}" --restarting'
-                else:
-                    app_args = f'"{os.path.abspath(sys.argv[0])}"'
-            
-            # 任务计划名称
-            task_name = f"{APP_NAME.replace(' ', '_')}_AdminTask"
-            
-            # 工作目录
-            work_dir = os.path.dirname(os.path.abspath(app_path if getattr(sys, 'frozen', False) else sys.argv[0]))
-            
-            # 创建XML文件内容
-            xml_content = f"""<?xml version="1.0" encoding="UTF-16"?>
-            <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-              <RegistrationInfo>
-                <Description>{APP_NAME} 管理员权限启动任务</Description>
-              </RegistrationInfo>
-              <Principals>
-                <Principal id="Author">
-                  <LogonType>InteractiveToken</LogonType>
-                  <RunLevel>HighestAvailable</RunLevel>
-                </Principal>
-              </Principals>
-              <Settings>
-                <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-                <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-                <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-                <AllowHardTerminate>true</AllowHardTerminate>
-                <StartWhenAvailable>false</StartWhenAvailable>
-                <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
-                <IdleSettings>
-                  <StopOnIdleEnd>false</StopOnIdleEnd>
-                  <RestartOnIdle>false</RestartOnIdle>
-                </IdleSettings>
-                <AllowStartOnDemand>true</AllowStartOnDemand>
-                <Enabled>true</Enabled>
-                <Hidden>false</Hidden>
-                <RunOnlyIfIdle>false</RunOnlyIfIdle>
-                <WakeToRun>false</WakeToRun>
-                <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-                <Priority>7</Priority>
-              </Settings>
-              <Actions Context="Author">
-                <Exec>
-                  <Command>{app_path}</Command>
-                  {f'<Arguments>{app_args}</Arguments>' if app_args else ''}
-                  <WorkingDirectory>{work_dir}</WorkingDirectory>
-                </Exec>
-              </Actions>
-            </Task>
-            """
-            
-            # 创建临时XML文件
-            import tempfile
-            with tempfile.NamedTemporaryFile(suffix='.xml', delete=False, mode='w', encoding='utf-16') as temp:
-                temp_xml_path = temp.name
-                temp.write(xml_content)
-            
-            # 使用schtasks创建任务
-            logger.info(f"正在创建管理员权限任务计划: {task_name}")
-            result = subprocess.run(
-                ['schtasks', '/create', '/tn', task_name, '/xml', temp_xml_path, '/f'],
-                capture_output=True,
-                text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
-            
-            # 删除临时XML文件
-            try:
-                os.unlink(temp_xml_path)
-            except:
-                pass
-            
-            # 检查是否成功
-            if result.returncode == 0:
-                logger.info("管理员权限任务计划创建成功")
-                return True
-            else:
-                logger.error(f"创建任务计划失败: {result.stderr}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"创建管理员权限任务计划失败: {str(e)}")
-            return False
+    # 使用工具模块中的 create_scheduled_task 函数来代替此方法
     
     def run_as_admin(self) -> None:
         """以管理员权限运行程序"""
-        if self.is_admin():
-            return
+        # 导入工具函数
+        from .utils import is_admin, create_scheduled_task, run_task, run_as_admin as utils_run_as_admin
         
+        # 检查是否已经是管理员权限
+        if is_admin():
+            QMessageBox.information(
+                self,
+                "已具有管理员权限",
+                "程序已经以管理员权限运行。"
+            )
+            return
+            
         try:
             # 保存当前配置
             self.save_config()
@@ -621,147 +627,76 @@ class HostsMonitorUI(QMainWindow):
             config.set("general", "run_as_admin", True)
             config.save_config()
             
-            # 首先尝试创建管理员权限的任务计划
-            # 此操作需要UAC确认，但只需要一次
-            if self.create_admin_task():
-                # 创建成功后，使用任务计划启动程序
-                task_name = f"{APP_NAME.replace(' ', '_')}_AdminTask"
-                logger.info(f"正在通过任务计划启动: {task_name}")
-                
-                # 启动任务
-                subprocess.Popen(
-                    ['schtasks', '/run', '/tn', task_name],
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                
+            # 首先尝试通过任务计划获取管理员权限
+            logger.info("尝试通过任务计划以管理员权限运行")
+            
+            # 使用工具函数创建任务计划并运行
+            success = False
+            if create_scheduled_task():
+                success = run_task()
+                if success:
+                    logger.info("管理员权限的新实例通过任务计划启动，当前实例即将退出")
+            
+            # 如果任务计划方式失败，回退到传统的UAC方式
+            if not success:
+                logger.warning("任务计划方式失败，尝试UAC提权")
+                # 准备参数
+                app_args = "--already-trying-uac"
+                # 使用工具函数尝试UAC提权
+                success = utils_run_as_admin(app_args=app_args)
+                if success:
+                    logger.info("管理员权限的新实例通过UAC启动，当前实例即将退出")
+            
+            # 如果成功启动了新实例
+            if success:
                 # 关闭系统托盘图标
                 self.tray_icon.hide()
                 
+                # 显示信息
+                QMessageBox.information(
+                    self,
+                    "获取管理员权限",
+                    "正在以管理员权限重新启动程序。\n当前实例将关闭。"
+                )
+                
                 # 等待一会儿后退出当前实例
-                logger.info("管理员权限的新实例通过任务计划启动，当前实例即将退出")
-                QTimer.singleShot(1000, QApplication.quit)
-                return
-            
-            # 如果任务计划创建失败，回退到传统的UAC方式
-            logger.warning("创建任务计划失败，将使用传统UAC方式请求管理员权限")
-            
-            # 获取当前程序路径
-            if getattr(sys, 'frozen', False):
-                app_path = sys.executable
-            else:
-                # 对于脚本，确保使用Python解释器启动
-                python_exe = sys.executable
-                app_path = python_exe
-                app_args = f'"{os.path.abspath(sys.argv[0])}" --already-trying-uac'
-            
-            # 对于打包版本，直接使用参数
-            if getattr(sys, 'frozen', False):
-                # 创建命令行参数，添加一个标记防止死循环
-                if "--already-trying-uac" not in sys.argv:
-                    app_args = "--already-trying-uac"
-                else:
-                    app_args = ""
-            
-            # 关闭系统托盘图标
-            self.tray_icon.hide()
-            
-            logger.info(f"尝试以管理员权限运行: {app_path} {app_args}")
-            
-            # 以管理员权限重启
-            # 确保工作目录正确设置
-            work_dir = os.path.dirname(os.path.abspath(app_path))
-            
-            # 使用ShellExecuteW启动
-            ret = ctypes.windll.shell32.ShellExecuteW(
-                None, "runas", app_path, app_args, work_dir, 1
-            )
-            
-            # 如果ShellExecuteW返回值大于32表示成功启动
-            if ret > 32:
-                logger.info("管理员权限的新实例已启动，当前实例即将退出")
-                # 直接退出当前实例，不显示提示弹窗
                 QTimer.singleShot(1000, QApplication.quit)
             else:
-                error_msg = "未知错误"
-                if ret == 0:
-                    error_msg = "系统内存或资源不足"
-                elif ret == 2:
-                    error_msg = "指定的文件未找到"
-                elif ret == 3:
-                    error_msg = "指定的路径未找到"
-                elif ret == 5:
-                    error_msg = "拒绝访问"
-                elif ret == 8:
-                    error_msg = "内存不足"
-                elif ret == 11:
-                    error_msg = "无效的格式"
-                elif ret == 26:
-                    error_msg = "共享冲突"
-                elif ret == 27:
-                    error_msg = "文件名不完整或无效"
-                elif ret == 28:
-                    error_msg = "打印机脱机"
-                elif ret == 29:
-                    error_msg = "已超时"
-                elif ret == 30:
-                    error_msg = "文件已在使用中"
-                elif ret == 31:
-                    error_msg = "没有关联的应用程序可执行此文件"
-                elif ret == 32:
-                    error_msg = "操作已取消"
-                
-                logger.error(f"以管理员权限运行失败，返回值: {ret}，错误: {error_msg}")
-                logger.error(f"程序路径: {app_path}")
-                logger.error(f"参数: {app_args}")
-                logger.error(f"工作目录: {work_dir}")
-                
-                QMessageBox.critical(self, "错误", f"以管理员权限运行失败: {error_msg} (代码: {ret})")
+                # 提权失败
+                QMessageBox.critical(
+                    self, 
+                    "错误", 
+                    "以管理员权限运行失败，请查看日志了解详情。"
+                )
         except Exception as e:
             logger.error(f"以管理员权限运行失败: {str(e)}")
             QMessageBox.critical(self, "错误", f"以管理员权限运行失败: {str(e)}")
     
     def toggle_autostart(self, state: int) -> None:
         """切换开机自启状态"""
+        # 导入工具函数
+        from .utils import set_autostart
+        
+        # 启用或禁用自启动
+        is_checked = state == Qt.CheckState.Checked.value
+        action_desc = '设置' if is_checked else '取消'
+        
         try:
-            is_checked = state == Qt.CheckState.Checked.value
-            
-            # 获取程序路径
-            if getattr(sys, 'frozen', False):
-                app_path = f'"{sys.executable}"'
+            # 使用工具函数设置自启动
+            if set_autostart(enable=is_checked):
+                logger.info(f"已{action_desc}开机自启")
+                
+                # 更新配置
+                config.set("general", "auto_start", is_checked)
+                config.save_config()
             else:
-                app_path = f'"{sys.executable}" "{os.path.abspath(sys.argv[0])}"'
-            
-            # 注册表路径
-            key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
-            
-            # 导入winreg模块
-            import winreg
-            
-            # 打开注册表项
-            key = winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER, key_path, 0, 
-                winreg.KEY_SET_VALUE | winreg.KEY_QUERY_VALUE
-            )
-            
-            if is_checked:
-                # 设置开机自启
-                winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, app_path)
-                logger.info("已设置开机自启")
-            else:
-                # 删除开机自启
-                try:
-                    winreg.DeleteValue(key, APP_NAME)
-                except FileNotFoundError:
-                    pass
-                logger.info("已取消开机自启")
-            
-            # 更新配置
-            config.set("general", "auto_start", is_checked)
-            config.save_config()
-            
+                # 设置失败，抛出异常统一处理
+                raise Exception(f"{action_desc}开机自启失败")
         except Exception as e:
-            logger.error(f"设置开机自启失败: {str(e)}")
-            QMessageBox.critical(self, "错误", f"设置开机自启失败: {str(e)}")
+            # 统一处理异常
+            error_msg = f"{action_desc}开机自启失败: {str(e)}"
+            logger.error(error_msg)
+            QMessageBox.critical(self, "错误", f"{action_desc}开机自启失败，请查看日志")
             
             # 回滚复选框状态
             self.autostart_cb.setChecked(not is_checked)
@@ -854,16 +789,8 @@ class HostsMonitorUI(QMainWindow):
     
     def update_monitor_button(self, is_monitoring: bool) -> None:
         """更新监控状态显示"""
-        if is_monitoring:
-            self.monitor_status_label.setText("监控状态: 运行中")
-            self.monitor_status_label.setStyleSheet("padding: 5px; border: 1px solid #c3e6cb; "
-                                                   "border-radius: 4px; background-color: #d4edda; "
-                                                   "color: #155724; font-weight: bold;")
-        else:
-            self.monitor_status_label.setText("监控状态: 已停止")
-            self.monitor_status_label.setStyleSheet("padding: 5px; border: 1px solid #f5c6cb; "
-                                                   "border-radius: 4px; background-color: #f8d7da; "
-                                                   "color: #721c24; font-weight: bold;")
+        self.monitor_status_label.setText("监控状态: 运行中" if is_monitoring else "监控状态: 已停止")
+        self.apply_status_style(self.monitor_status_label, is_monitoring)
     
     def manual_contrast(self) -> None:
         """手动执行对比"""
@@ -927,23 +854,23 @@ class HostsMonitorUI(QMainWindow):
         scrollbar = self.log_view.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
     
-    def resizeEvent(self, event) -> None:
+    def resizeEvent(self, event: QResizeEvent) -> None:
         """窗口大小变更事件处理"""
         super().resizeEvent(event)
         # 调用调整高度方法
         self.adjust_layout_heights()
-
+    
         # 不在每次调整大小时保存，避免频繁写入配置文件
         # 而是在窗口关闭时保存
-
-    def moveEvent(self, event) -> None:
+    
+    def moveEvent(self, event: QMoveEvent) -> None:
         """窗口移动事件处理"""
         super().moveEvent(event)
 
         # 不在每次移动时保存，避免频繁写入配置文件
         # 而是在窗口关闭时保存
 
-    def showEvent(self, event) -> None:
+    def showEvent(self, event: QShowEvent) -> None:
         """窗口显示事件，用于初始化高度设置"""
         super().showEvent(event)
         # 显示后立即触发一次尺寸调整

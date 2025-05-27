@@ -5,10 +5,9 @@
 - 使用PyInstaller打包应用程序
 """
 
-import os
-import sys
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 

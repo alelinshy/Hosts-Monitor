@@ -7,7 +7,7 @@
 
 import os
 import threading
-from typing import Callable, Optional, List, Tuple
+from typing import Callable, Tuple
 
 from . import logger
 from .config import config

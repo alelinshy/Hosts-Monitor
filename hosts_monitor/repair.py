@@ -5,13 +5,12 @@
 - 按修复逻辑修复hosts文件
 """
 
-import os
 import threading
 import time
-import win32file
-import win32con
-import ctypes
 from typing import List, Tuple, Optional
+
+import win32con
+import win32file
 
 from . import logger
 from .config import config
@@ -110,6 +109,27 @@ class RepairModule:
             logger.error(f"写入文件内容时发生错误: {str(e)}")
             return False
     
+    def _ensure_single_empty_lines(self, lines: List[str]) -> None:
+        """确保文件中只有单个空行，删除多余的空行
+        
+        参数:
+            lines: 文件的所有行
+        """
+        # 1. 移除所有末尾空行
+        while lines and not lines[-1].strip():
+            lines.pop()
+        
+        # 2. 确保文件最后有且仅有一个换行符
+        lines.append("")
+        
+        # 3. 确保整个文件中不存在连续的空行
+        i = 1
+        while i < len(lines):
+            if not lines[i].strip() and not lines[i-1].strip():
+                del lines[i]
+            else:
+                i += 1
+    
     def _find_match_positions(self, hosts_lines: List[str], config_lines: List[str]) -> List[int]:
         """查找匹配位置"""
         match_positions = []
@@ -134,6 +154,91 @@ class RepairModule:
                     match_positions.append(i)
         
         return match_positions
+    
+    def _remove_empty_lines(self, hosts_lines: List[str], position: int) -> Tuple[int, int]:
+        """删除多余空行，确保只保留一个空行
+        
+        参数:
+            hosts_lines: hosts文件的所有行
+            position: 当前处理位置
+            
+        返回:
+            Tuple[int, int]: 处理后的位置和删除的空行数
+        """
+        empty_line_count = 0
+        while position < len(hosts_lines) and not hosts_lines[position].strip():
+            empty_line_count += 1
+            del hosts_lines[position]
+            
+        # 如果需要，重新添加一个空行
+        if empty_line_count > 0 and position < len(hosts_lines):
+            hosts_lines.insert(position, "")
+            position += 1
+            
+        return position, empty_line_count
+    
+    def _process_match_position(self, hosts_lines: List[str], config_lines: List[str], position: int) -> int:
+        """处理匹配位置，删除原有内容并准备插入新内容"""
+        # 检查是否是"# Hosts Monitor 数据"标记行的匹配
+        is_comment_match = hosts_lines[position].strip().startswith('#')
+        
+        # 如果是注释行匹配，查找此注释行后的所有连续数据行并删除
+        if is_comment_match:
+            # 先删除匹配的注释行
+            del hosts_lines[position]
+            
+            # 删除匹配行后的连续非空行，直到遇到空行或注释行为止
+            while (position < len(hosts_lines) and 
+                  hosts_lines[position].strip() and 
+                  not hosts_lines[position].strip().startswith('#')):
+                del hosts_lines[position]
+                
+            # 删除所有多余空行，确保只保留一个空行
+            position, _ = self._remove_empty_lines(hosts_lines, position)
+        else:
+            # 不是注释行匹配，按原有逻辑处理
+            del hosts_lines[position]
+            
+            # 删除所有多余空行，确保只保留一个空行
+            position, _ = self._remove_empty_lines(hosts_lines, position)
+        
+        # 在匹配位置前确保有且只有一个空行
+        if position > 0:
+            # 首先删除前面所有连续的空行
+            while position > 1 and not hosts_lines[position-1].strip() and not hosts_lines[position-2].strip():
+                del hosts_lines[position-1]
+                position -= 1
+                
+            # 检查前面是否已有一个空行
+            if position > 0 and hosts_lines[position-1].strip():
+                # 如果前面不是空行，添加一个空行
+                hosts_lines.insert(position, "")
+                position += 1
+        else:
+            # 在文件开头，直接添加一个空行
+            hosts_lines.insert(0, "")
+            position += 1
+            
+        # 插入配置数据
+        for i, line in enumerate(config_lines):
+            hosts_lines.insert(position + i, line)
+            
+        # 在配置数据后确保有且只有一个空行
+        new_position = position + len(config_lines)
+        
+        # 删除可能存在的多余空行并确保只有一个空行
+        if new_position < len(hosts_lines):
+            # 使用辅助方法处理空行
+            new_position, empty_line_count = self._remove_empty_lines(hosts_lines, new_position)
+            
+            # 如果没有发现空行且不是文件末尾，添加一个空行
+            if empty_line_count == 0 and new_position < len(hosts_lines):
+                hosts_lines.insert(new_position, "")
+        else:
+            # 已到文件末尾，添加一个空行
+            hosts_lines.append("")
+            
+        return new_position
     
     def _repair_hosts_file(self, handle: int) -> bool:
         """修复hosts文件"""
@@ -182,57 +287,8 @@ class RepairModule:
             position = match_positions[0]
             logger.info(f"本地hosts文件中有一行匹配的数据，在位置 {position} 处插入")
             
-            # 检查是否是"# Hosts Monitor 数据"标记行的匹配
-            is_comment_match = hosts_lines[position].strip().startswith('#')
-            
-            # 如果是注释行匹配，查找此注释行后的所有连续数据行并删除
-            if is_comment_match:
-                # 先删除匹配的注释行
-                del hosts_lines[position]
-                
-                # 删除匹配行后的连续非空行，直到遇到空行或注释行为止
-                while (position < len(hosts_lines) and 
-                      hosts_lines[position].strip() and 
-                      not hosts_lines[position].strip().startswith('#')):
-                    del hosts_lines[position]
-                    
-                # 删除可能存在的多余空行
-                while position < len(hosts_lines) and not hosts_lines[position].strip():
-                    del hosts_lines[position]
-            else:
-                # 不是注释行匹配，按原有逻辑处理
-                del hosts_lines[position]
-                
-                # 删除可能存在的多余空行
-                if position < len(hosts_lines) and not hosts_lines[position].strip():
-                    del hosts_lines[position]
-            
-            # 在匹配位置前确保有一个空行（不多不少）
-            if position > 0:
-                # 检查前面是否已有空行
-                if hosts_lines[position-1].strip():
-                    # 如果前面不是空行，添加一个空行
-                    hosts_lines.insert(position, "")
-                    position += 1
-            else:
-                # 在文件开头，直接添加一个空行
-                hosts_lines.insert(0, "")
-                position += 1
-                
-            # 插入配置数据
-            for i, line in enumerate(config_lines):
-                hosts_lines.insert(position + i, line)
-                
-            # 在配置数据后确保有一个空行（不多不少）
-            new_position = position + len(config_lines)
-            if new_position < len(hosts_lines):
-                # 检查后面是否已有空行
-                if hosts_lines[new_position].strip():
-                    # 如果后面不是空行，添加一个空行
-                    hosts_lines.insert(new_position, "")
-            else:
-                # 已到文件末尾，添加一个空行
-                hosts_lines.append("")
+            # 处理匹配位置
+            self._process_match_position(hosts_lines, config_lines, position)
                 
         else:
             # 情况3: 有多行匹配，以第一行为基准，删除其余匹配行
@@ -244,65 +300,11 @@ class RepairModule:
             for pos in reversed(match_positions[1:]):
                 del hosts_lines[pos]
             
-            # 检查第一个匹配是否是"# Hosts Monitor 数据"标记行
-            is_comment_match = hosts_lines[first_match].strip().startswith('#')
-            
-            # 如果是注释行匹配，查找此注释行后的所有连续数据行并删除
-            if is_comment_match:
-                # 先删除匹配的注释行
-                del hosts_lines[first_match]
-                
-                # 删除匹配行后的连续非空行，直到遇到空行或注释行为止
-                while (first_match < len(hosts_lines) and 
-                      hosts_lines[first_match].strip() and 
-                      not hosts_lines[first_match].strip().startswith('#')):
-                    del hosts_lines[first_match]
-                    
-                # 删除可能存在的多余空行
-                while first_match < len(hosts_lines) and not hosts_lines[first_match].strip():
-                    del hosts_lines[first_match]
-            else:
-                # 不是注释行匹配，按原有逻辑处理
-                del hosts_lines[first_match]
-                
-                # 删除可能存在的多余空行
-                if first_match < len(hosts_lines) and not hosts_lines[first_match].strip():
-                    del hosts_lines[first_match]
-            
-            # 在匹配位置前确保有一个空行（不多不少）
-            if first_match > 0:
-                # 检查前面是否已有空行
-                if hosts_lines[first_match-1].strip():
-                    # 如果前面不是空行，添加一个空行
-                    hosts_lines.insert(first_match, "")
-                    first_match += 1
-            else:
-                # 在文件开头，直接添加一个空行
-                hosts_lines.insert(0, "")
-                first_match += 1
-                
-            # 插入配置数据
-            for i, line in enumerate(config_lines):
-                hosts_lines.insert(first_match + i, line)
-                
-            # 在配置数据后确保有一个空行（不多不少）
-            new_position = first_match + len(config_lines)
-            if new_position < len(hosts_lines):
-                # 检查后面是否已有空行
-                if hosts_lines[new_position].strip():
-                    # 如果后面不是空行，添加一个空行
-                    hosts_lines.insert(new_position, "")
-            else:
-                # 已到文件末尾，添加一个空行
-                hosts_lines.append("")
+            # 处理第一个匹配位置
+            self._process_match_position(hosts_lines, config_lines, first_match)
         
-        # 处理文件末尾：
-        # 1. 移除所有末尾空行
-        while hosts_lines and not hosts_lines[-1].strip():
-            hosts_lines.pop()
-        
-        # 2. 确保文件最后有且仅有一个换行符
-        hosts_lines.append("")
+        # 处理文件末尾和确保整个文件中不存在连续的空行
+        self._ensure_single_empty_lines(hosts_lines)
         
         # 将行组合成文本
         new_content = "\n".join(hosts_lines)
@@ -357,7 +359,8 @@ class RepairModule:
     def _is_admin(self) -> bool:
         """检查是否以管理员权限运行"""
         try:
-            return ctypes.windll.shell32.IsUserAnAdmin() != 0
+            from .utils import is_admin
+            return is_admin()
         except Exception as e:
             logger.error(f"检查管理员权限时出错: {str(e)}")
             return False

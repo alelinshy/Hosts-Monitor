@@ -7,11 +7,12 @@
 
 import os
 import sys
-import time
 import threading
-from typing import Callable, Optional, Set, List, Dict, Any
+import time
+from typing import Callable
+
 import watchfiles
-from watchfiles import watch, Change
+from watchfiles import watch
 
 from . import logger
 from .config import config

@@ -12,7 +12,7 @@ import logging
 import os
 import sys
 from datetime import datetime
-from typing import Optional, Callable
+from typing import Callable
 
 # 定义日志格式
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
