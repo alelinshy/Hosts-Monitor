@@ -136,10 +136,23 @@ def get_app_paths():
 
 
 def create_task_xml(
-    executable_path, args="", add_restart_param=False, user_id=None, logon_type="S4U"
+    executable_path,
+    args="",
+    add_restart_param=False,
+    user_id=None,
+    logon_type="S4U",
+    delete_after_run=False,
 ):
     """
     生成用于注册计划任务的 XML 内容，任务将在用户登录时以最高权限静默运行。
+
+    参数:
+        executable_path: 可执行文件路径
+        args: 命令行参数
+        add_restart_param: 是否添加重启参数
+        user_id: 用户ID
+        logon_type: 登录类型，默认为S4U(Service for User)，不需要用户登录
+        delete_after_run: 任务执行完后是否自动删除
     """
     # 如果需要添加重启参数且参数中尚未包含
     if add_restart_param and "--restarting" not in args:
@@ -162,6 +175,8 @@ def create_task_xml(
     logger.info(f"任务计划配置 - 参数: {args}")
     logger.info(f"任务计划配置 - 工作目录: {working_dir}")
     logger.info(f"任务计划配置 - 用户: {user_id}")
+    logger.info(f"任务计划配置 - 登录类型: {logon_type}")
+    logger.info(f"任务计划配置 - 执行后删除: {delete_after_run}")
 
     # 创建任务XML
     xml = f"""<?xml version="1.0" encoding="UTF-16"?>
@@ -177,7 +192,7 @@ def create_task_xml(
     <!-- 系统启动时触发 -->
     <BootTrigger>
       <Enabled>true</Enabled>
-      <Delay>PT15S</Delay>
+      <Delay>PT30S</Delay>
     </BootTrigger>
   </Triggers>
   <Principals>
@@ -205,6 +220,7 @@ def create_task_xml(
     <WakeToRun>false</WakeToRun>
     <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
     <Priority>7</Priority>
+    {"<DeleteExpiredTaskAfter>PT0S</DeleteExpiredTaskAfter>" if delete_after_run else ""}
   </Settings>
   <Actions Context="Author">
     <Exec>
@@ -224,6 +240,8 @@ def create_scheduled_task(
     executable_path=None,
     args="",
     add_restart_param=False,
+    delete_after_run=False,
+    skip_admin_check=True,
 ):
     """
     创建或更新计划任务
@@ -234,6 +252,8 @@ def create_scheduled_task(
         executable_path: 可执行文件路径，用于生成XML
         args: 命令行参数
         add_restart_param: 是否添加重启参数
+        delete_after_run: 是否在运行一次后自动删除任务
+        skip_admin_check: 是否添加跳过管理员权限检查的参数
 
     返回:
         bool: 操作是否成功
@@ -260,11 +280,22 @@ def create_scheduled_task(
                 logger.info(f"任务配置 - 可执行文件: {executable_path}")
                 logger.info(f"任务配置 - 参数: {args}")
 
+            # 添加跳过管理员权限检查参数
+            if skip_admin_check and "--skip-admin-check" not in args:
+                args += " --skip-admin-check" if args else "--skip-admin-check"
+                logger.info(f"已添加跳过管理员权限检查参数，更新后的参数: {args}")
+
+            # 添加一次性任务参数（如需要）
+            if delete_after_run and "/Z" not in args:
+                # 添加删除任务参数，一些属性需要在XML中设置
+                logger.info("配置一次性任务：运行完成后将自动删除")
+
             # 生成XML内容
             xml_content = create_task_xml(
                 executable_path=executable_path,
                 args=args,
                 add_restart_param=add_restart_param,
+                delete_after_run=delete_after_run,
             )
 
         # 创建临时XML文件
@@ -656,17 +687,24 @@ def register_system_restart():
             script_path = paths["script_path"]
             args = f'"{script_path}"'
 
-        # 添加静默启动和重启参数
+        # 添加必要的启动参数
+        # 1. 添加重启标识参数
         if "--restarting" not in args:
             args += " --restarting" if args else "--restarting"
 
-        # 显式创建任务XML
+        # 2. 添加跳过管理员权限检查参数，避免UAC提示
+        if "--skip-admin-check" not in args:
+            args += " --skip-admin-check" if args else "--skip-admin-check"
+
+        logger.info(f"系统重启任务参数: {args}")
+
+        # 创建任务XML
         xml_content = create_task_xml(
             executable_path=executable_path,
             args=args,
-            add_restart_param=True,
-            # 确保使用S4U (Service for User)类型，以允许在没有用户登录的情况下运行
-            logon_type="S4U",
+            add_restart_param=True,  # 确保添加重启参数
+            logon_type="S4U",  # 使用S4U服务模式，无需用户交互
+            delete_after_run=False,  # 不是一次性任务，保留任务
         )
 
         # 创建或更新计划任务
@@ -675,6 +713,7 @@ def register_system_restart():
             executable_path=executable_path,
             args=args,
             add_restart_param=True,
+            skip_admin_check=True,  # 确保跳过admin检查
         )
 
         if not success:
@@ -684,21 +723,22 @@ def register_system_restart():
         # 清除原来的注册表自启动项，仅保留计划任务
         try:
             set_autostart(enable=False, update_config=False)
-            logger.info("注册表自启动已移除")
+            logger.info("注册表自启动已移除，将仅使用计划任务静默启动")
         except Exception as e:
             logger.warning(f"移除注册表自启动失败: {e}")
 
-        # 更新配置，设置auto_start为True，因为我们使用计划任务实现了自启动
+        # 更新配置，设置auto_start为True
         try:
             from .config import config
 
             config.set("general", "auto_start", True)
+            config.set("general", "run_as_admin", True)  # 确保设置了管理员权限标记
             config.save_config()
             logger.info("已将配置中的开机自启动设置更新为: True")
         except Exception as config_e:
             logger.error(f"更新配置文件的开机自启动设置失败: {str(config_e)}")
 
-        logger.info("系统重启任务注册成功（仅计划任务，静默启动配置已应用）")
+        logger.info("系统重启任务注册成功（已配置为静默以管理员权限启动）")
         return True
     except Exception as e:
         logger.error(f"注册系统重启任务失败: {str(e)}")
