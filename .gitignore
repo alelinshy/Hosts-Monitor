@@ -5,6 +5,7 @@ __pycache__/
 
 # Virtual environment
 .venv/
+.idea/
 
 # 忽略打包文件
 dist/
