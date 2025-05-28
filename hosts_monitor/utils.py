@@ -174,11 +174,11 @@ def create_task_xml(
     <LogonTrigger>
       <Enabled>true</Enabled>
     </LogonTrigger>
-    <!-- 如果你希望在系统启动时就运行，可以同时加上 BootTrigger：
+    <!-- 系统启动时触发 -->
     <BootTrigger>
       <Enabled>true</Enabled>
+      <Delay>PT15S</Delay>
     </BootTrigger>
-    -->
   </Triggers>
   <Principals>
     <Principal id="Author">
@@ -600,8 +600,8 @@ def sync_autostart_state():
         bool: 操作是否成功
     """
     try:
-        # 获取系统实际自启动状态
-        system_autostart = check_autostart()
+        # 获取系统实际自启动状态（注册表或任务计划）
+        system_autostart = check_autostart() or check_task_exists()
 
         # 获取配置中的自启动状态
         from .config import config
@@ -637,6 +637,7 @@ def sync_autostart_state():
 def register_system_restart():
     """
     只通过计划任务实现开机/登录自启，并移除注册表 Run 项，避免 UAC 弹窗。
+    确保程序在系统启动时能够静默以管理员权限运行。
     """
     try:
         # 确保已获取管理员权限
@@ -644,20 +645,60 @@ def register_system_restart():
             logger.warning("没有管理员权限，无法注册系统重启任务")
             return False
 
+        # 获取应用路径信息用于创建任务
+        paths = get_app_paths()
+        executable_path = paths["app_path"]
+
+        # 准备参数
+        args = ""
+        if not paths["is_frozen"]:
+            # 对于Python脚本，确保路径正确传递
+            script_path = paths["script_path"]
+            args = f'"{script_path}"'
+
+        # 添加静默启动和重启参数
+        if "--restarting" not in args:
+            args += " --restarting" if args else "--restarting"
+
+        # 显式创建任务XML
+        xml_content = create_task_xml(
+            executable_path=executable_path,
+            args=args,
+            add_restart_param=True,
+            # 确保使用S4U (Service for User)类型，以允许在没有用户登录的情况下运行
+            logon_type="S4U",
+        )
+
         # 创建或更新计划任务
-        success = create_scheduled_task(add_restart_param=True)
+        success = create_scheduled_task(
+            xml_content=xml_content,
+            executable_path=executable_path,
+            args=args,
+            add_restart_param=True,
+        )
+
         if not success:
             logger.error("无法创建重启任务")
             return False
 
         # 清除原来的注册表自启动项，仅保留计划任务
         try:
-            set_autostart(enable=False)
+            set_autostart(enable=False, update_config=False)
             logger.info("注册表自启动已移除")
         except Exception as e:
             logger.warning(f"移除注册表自启动失败: {e}")
 
-        logger.info("系统重启任务注册成功（仅计划任务）")
+        # 更新配置，设置auto_start为True，因为我们使用计划任务实现了自启动
+        try:
+            from .config import config
+
+            config.set("general", "auto_start", True)
+            config.save_config()
+            logger.info("已将配置中的开机自启动设置更新为: True")
+        except Exception as config_e:
+            logger.error(f"更新配置文件的开机自启动设置失败: {str(config_e)}")
+
+        logger.info("系统重启任务注册成功（仅计划任务，静默启动配置已应用）")
         return True
     except Exception as e:
         logger.error(f"注册系统重启任务失败: {str(e)}")
