@@ -289,19 +289,39 @@ def create_admin_task(
 
         # 设置任务注册信息
         task_def.RegistrationInfo.Description = f"{APP_NAME} 管理员权限静默启动任务"
-        task_def.RegistrationInfo.Author = APP_NAME
+        task_def.RegistrationInfo.Author = APP_NAME  # 创建登录触发器
+        try:
+            # 使用TASK_TRIGGER_LOGON(8)表示用户登录时
+            trigger = task_def.Triggers.Create(8)
+            # 对于某些Windows版本，默认登录用户可能不生效
+            # 在一个try块中尝试设置
+            try:
+                # 尝试设置为当前用户
+                # 这在某些系统上可能不支持，所以单独捕获此处可能的异常
+                trigger.UserId = getpass.getuser()
+            except:
+                logger.info("无法设置UserId属性，将使用默认登录用户")
 
-        # 创建登录触发器
-        trigger = task_def.Triggers.Create(1)  # 登录时
-
-        # 创建执行动作
+            trigger.Enabled = True
+        except Exception as e:
+            # 如果登录触发器创建失败，尝试使用TASK_TRIGGER_REGISTRATION(7)替代
+            logger.warning(f"创建登录触发器失败: {str(e)}，尝试使用注册触发器")
+            trigger = task_def.Triggers.Create(7)  # TASK_TRIGGER_REGISTRATION
+            trigger.Enabled = True  # 创建执行动作
         action = task_def.Actions.Create(0)
         action.Path = python_exec
-        action.Arguments = (
-            f'"{script_path}" --skip-admin-check'
-            if script_path
-            else "--skip-admin-check"
-        )
+
+        # 根据是否是打包的可执行文件设置不同的参数
+        if script_path and script_path.strip():
+            # 对于脚本路径，需要正确处理引号
+            # 如果是字符串参数，确保用引号包裹
+            if script_path.startswith('"') and script_path.endswith('"'):
+                action.Arguments = f"{script_path} --skip-admin-check"
+            else:
+                action.Arguments = f'"{script_path}" --skip-admin-check'
+        else:
+            # 对于打包的可执行文件，直接设置参数
+            action.Arguments = "--minimized --skip-admin-check"
 
         # 设置工作目录
         if script_path:
@@ -542,6 +562,17 @@ def register_system_restart() -> bool:
 
         logger.info("正在配置静默管理员权限启动...")
 
+        # 确保任务不存在，先删除旧任务
+        try:
+            if task_exists(task_name):
+                scheduler = get_task_service()
+                if scheduler:
+                    root_folder = scheduler.GetFolder("\\")
+                    root_folder.DeleteTask(task_name, 0)
+                    logger.info(f"已删除旧的自启动任务: {task_name}")
+        except Exception as e:
+            logger.warning(f"删除旧任务失败，将尝试覆盖: {str(e)}")
+
         # 获取应用路径信息
         paths = get_app_paths()
 
@@ -579,7 +610,10 @@ def register_system_restart() -> bool:
 
             if paths["is_frozen"]:
                 # 打包后的应用直接使用可执行文件
-                result = create_admin_task(task_name, "", python_exec)
+                # 确保添加必要的启动参数
+                result = create_admin_task(
+                    task_name, "--minimized --skip-admin-check", python_exec
+                )
             else:
                 # 未打包的Python脚本
                 result = create_admin_task(task_name, script_path, python_exec)
