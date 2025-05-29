@@ -319,24 +319,48 @@ def create_admin_task(
                 action.Arguments = f"{script_path} --skip-admin-check"
             else:
                 action.Arguments = f'"{script_path}" --skip-admin-check'
-        else:
-            # 对于打包的可执行文件，直接设置参数
-            action.Arguments = "--minimized --skip-admin-check"
+        else:  # 对于打包的可执行文件，直接设置参数
+            action.Arguments = "--minimized"
 
         # 设置工作目录
         if script_path:
-            action.WorkingDirectory = os.path.dirname(script_path)
-
-        # 设置执行账户和权限
-        task_def.Principal.UserId = "SYSTEM"  # 使用系统账户
+            action.WorkingDirectory = os.path.dirname(script_path)  # 设置执行账户和权限
+        username = getpass.getuser()  # 获取当前用户名
+        task_def.Principal.UserId = username  # 使用当前用户
         task_def.Principal.LogonType = 3  # TASK_LOGON_INTERACTIVE_TOKEN
         task_def.Principal.RunLevel = 1  # TASK_RUNLEVEL_HIGHEST (管理员权限)
 
         # 设置其他任务选项
         task_def.Settings.Enabled = True
-        task_def.Settings.Hidden = True
+        task_def.Settings.Hidden = False  # 可见任务，便于调试
         task_def.Settings.StartWhenAvailable = True
-        task_def.Settings.DisallowStartIfOnBatteries = False
+        task_def.Settings.DisallowStartIfOnBatteries = (
+            False  # 设置任务文件夹位置为程序目录
+        )
+        task_folder_path = ""  # 根文件夹 (默认)
+
+        # 尝试获取程序所在位置作为任务文件夹
+        paths = get_app_paths()
+        if paths and "app_dir" in paths:
+            folder_name = os.path.basename(paths["app_dir"])
+            if folder_name:
+                try:
+                    # 先检查文件夹是否存在，不存在则创建
+                    try:
+                        task_folder = scheduler.GetFolder("\\" + folder_name)
+                        logger.info(f"任务计划文件夹已存在: {folder_name}")
+                    except:
+                        # 创建文件夹
+                        root_folder.CreateFolder(folder_name)
+                        logger.info(f"已创建任务计划文件夹: {folder_name}")
+                        task_folder = scheduler.GetFolder("\\" + folder_name)
+
+                    # 使用程序文件夹作为任务位置
+                    task_folder_path = "\\" + folder_name
+                    logger.info(f"将使用自定义任务文件夹: {task_folder_path}")
+                    root_folder = task_folder
+                except Exception as e:
+                    logger.warning(f"创建任务文件夹失败: {str(e)}，将使用根文件夹")
 
         # 注册任务定义
         # 使用数字常量而不是空字符串，避免类型转换错误
@@ -608,12 +632,9 @@ def register_system_restart() -> bool:
         else:
             logger.info(f"开始创建计划任务：{task_name}")
 
-            if paths["is_frozen"]:
-                # 打包后的应用直接使用可执行文件
+            if paths["is_frozen"]:  # 打包后的应用直接使用可执行文件
                 # 确保添加必要的启动参数
-                result = create_admin_task(
-                    task_name, "--minimized --skip-admin-check", python_exec
-                )
+                result = create_admin_task(task_name, "--minimized", python_exec)
             else:
                 # 未打包的Python脚本
                 result = create_admin_task(task_name, script_path, python_exec)
