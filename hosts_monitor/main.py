@@ -14,7 +14,7 @@ from . import logger
 from .version import APP_NAME, VERSION
 from .config import config
 from .controller import controller
-from .utils import TASK_NAME, is_admin, get_app_paths, run_as_admin, check_task_exists
+from .utils import is_admin, get_app_paths, run_as_admin
 
 
 def check_single_instance() -> bool:
@@ -35,62 +35,12 @@ def check_single_instance() -> bool:
 
 
 def run_as_task() -> bool:
-    """通过任务计划以管理员权限运行程序"""
-    try:
-        import traceback
-        from .utils import (
-            check_task_exists,
-            run_task,
-            create_scheduled_task,
-            delete_scheduled_task,
-        )
-
-        # 先删除可能存在的旧任务
-        if check_task_exists():
-            logger.info("发现已存在的管理员权限任务计划，将先删除")
-            delete_scheduled_task()
-            time.sleep(0.5)  # 给系统一点时间处理删除操作
-
-        # 获取当前参数，准备添加到任务中
-        current_args = " ".join(sys.argv[1:])
-        if "--skip-admin-check" not in current_args:
-            current_args += (
-                " --skip-admin-check" if current_args else "--skip-admin-check"
-            )
-
-        if "--restarting" in sys.argv and "--restarting" not in current_args:
-            current_args += " --restarting" if current_args else "--restarting"
-
-        # 创建一次性任务 - 运行后自动删除
-        logger.info("正在创建一次性管理员权限任务计划...")
-        task_created = create_scheduled_task(
-            args=current_args,
-            add_restart_param="--restarting" in sys.argv,
-            delete_after_run=True,  # 重要：运行一次后自动删除
-        )
-
-        if not task_created:
-            logger.error("创建一次性管理员权限任务计划失败")
-            return False
-
-        # 使用任务运行程序
-        logger.info("正在通过任务计划启动管理员权限实例...")
-        if run_task():
-            logger.info(f"已通过一次性任务计划启动管理员权限实例")
-            # 增加额外等待时间，确保新实例有足够时间启动
-            time.sleep(1)
-            return True
-        else:
-            logger.error("通过任务计划启动失败")
-            # 清理失败的任务
-            delete_scheduled_task()
-            return False
-    except Exception as e:
-        # 获取详细的异常信息
-        exc_info = traceback.format_exc()
-        logger.error(f"通过任务计划启动失败: {str(e)}")
-        logger.error(f"详细异常信息: {exc_info}")
-        return False
+    """
+    通过pyuac库以管理员权限运行程序
+    任务计划方式已弃用
+    """
+    logger.info("使用PyUAC库替代任务计划方式请求管理员权限")
+    return False
 
 
 def check_and_run_as_admin() -> bool:
@@ -116,11 +66,16 @@ def check_and_run_as_admin() -> bool:
         logger.info(
             f"启动信息 - 管理员权限: {admin_status}, 重启标识: {is_restarting}, UAC提权: {is_uac_restart}, 跳过权限检查: {skip_admin_check}"
         )
-        logger.info(f"启动参数: {sys.argv}")
-
-        # 如果是由任务计划启动并要求跳过管理员权限检查，直接返回
+        logger.info(
+            f"启动参数: {sys.argv}"
+        )  # 如果是由任务计划启动并要求跳过管理员权限检查，直接返回
         if skip_admin_check:
-            logger.info("检测到跳过管理员权限检查的参数，继续启动")
+            logger.info("检测到跳过管理员检查标记，直接启动程序")
+            # 确保配置仍标记为需要管理员权限，以防被误改
+            if admin_status and config.get("general", "run_as_admin", False) != True:
+                config.set("general", "run_as_admin", True)
+                config.save_config()
+                logger.info("已更新配置，确保管理员权限标志设置正确")
             return False
 
         # 如果已经通过UAC提权重启且已具备管理员权限，直接返回
@@ -135,10 +90,8 @@ def check_and_run_as_admin() -> bool:
                 logger.info("系统重启后已经以管理员权限运行")
                 return False
 
-            # 通过任务计划静默获取管理员权限
-            if run_as_task():
-                logger.info("系统重启后通过任务计划获取管理员权限成功")
-                return True
+            # 任务计划方式已弃用，直接使用PyUAC方式
+            logger.info("系统重启后将使用PyUAC方式获取管理员权限")
 
         # 如果配置了需要管理员权限，但当前没有管理员权限，则尝试提权
         if config.get("general", "run_as_admin", False) and not admin_status:
@@ -227,53 +180,29 @@ def check_and_run_as_admin() -> bool:
 
 
 def create_restart_task(update=False, delete_after_run=False) -> bool:
-    """创建重启时使用的静默管理员权限任务
+    """
+    创建重启时使用的静默管理员权限启动项
+    使用pywin32库创建管理员权限启动快捷方式
 
     参数:
-        update: 是否是更新现有任务
-        delete_after_run: 是否在运行一次后自动删除任务
+        update: 未使用，保留参数兼容性
+        delete_after_run: 未使用，保留参数兼容性
     """
     try:
-        import traceback
+        # 使用专门的工具函数注册系统重启
+        from .utils import register_system_restart
 
-        # 导入工具函数
-        from .utils import (
-            check_task_exists,
-            create_scheduled_task,
-            delete_scheduled_task,
-        )
-
-        # 如果是更新模式，先删除现有任务
-        if update and check_task_exists():
-            logger.info("正在删除现有任务以进行更新")
-            delete_scheduled_task()
-            time.sleep(0.5)  # 给系统一点时间处理删除操作
-        # 如果是非更新模式且任务已存在，直接返回成功
-        elif not update and check_task_exists():
-            logger.info("任务计划已存在，无需创建")
-            return True
-
-        logger.info(f"{'更新' if update else '创建'}管理员权限任务计划")
-        logger.info(f"任务配置: 运行后{'自动删除' if delete_after_run else '保留'}")
-
-        # 准备额外参数
-        extra_args = "--skip-admin-check"
-
-        # 使用工具函数创建任务
-        result = create_scheduled_task(
-            args=extra_args,
-            add_restart_param=True,
-            delete_after_run=delete_after_run,  # 传递是否自动删除选项
-        )
+        logger.info("使用pywin32配置静默管理员权限启动")
+        result = register_system_restart()
 
         if result:
-            logger.info(f"管理员权限任务计划{'更新' if update else '创建'}成功")
+            logger.info("静默管理员权限启动配置成功")
         else:
-            logger.error(f"{'更新' if update else '创建'}任务计划失败")
+            logger.error("静默管理员权限启动配置失败")
 
         return result
     except Exception as e:
-        logger.error(f"创建管理员权限任务计划失败: {str(e)}")
+        logger.error(f"配置静默管理员权限启动失败: {str(e)}")
         return False
 
 
@@ -307,9 +236,9 @@ def main() -> int:
         logger.info("检测到系统重启后启动")
 
     # 检查命令行参数中是否有跳过管理员检查的标记
-    skip_admin_check = "--skip-admin-check" in sys.argv
-
-    # 如果没有跳过检查，则执行管理员权限检查
+    skip_admin_check = (
+        "--skip-admin-check" in sys.argv
+    )  # 如果没有跳过检查，则执行管理员权限检查
     if not skip_admin_check:
         # 检查并以管理员权限运行
         if check_and_run_as_admin():
@@ -320,10 +249,10 @@ def main() -> int:
             # 正常退出，让新实例接管运行
             return 0
     else:
-        logger.info("检测到跳过管理员检查标记，直接启动程序")
-    # 检查是否已具有管理员权限
+        logger.info(
+            "检测到跳过管理员检查标记，直接启动程序"
+        )  # 检查是否已具有管理员权限
     admin_status = is_admin()
-
     if admin_status:
         logger.info("程序已经以管理员权限运行")
         # 如果是管理员权限且需要管理员权限运行，注册系统重启任务
@@ -332,6 +261,7 @@ def main() -> int:
             # 如果是重启，确保任务是最新的
             register_system_restart()
             logger.info("已配置系统重启任务，下次开机将静默以管理员权限启动")
+
     # 同步开机自启动状态，确保配置文件与系统实际状态一致
     from .utils import sync_autostart_state
 
