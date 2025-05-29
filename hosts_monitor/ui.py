@@ -68,7 +68,10 @@ try:
     from .monitor import monitor
     from .contrast import contrast_module
     from .repair import repair_module
-    from .controller import controller
+
+    # 避免循环导入
+    # 通过延迟导入controller来避免循环导入问题
+    controller = None
 except ImportError:
     # 当直接运行UI模块时的导入方式
     import sys
@@ -261,9 +264,7 @@ class HostsMonitorUI(QMainWindow):
         self.setup_tray_icon()
 
         # 初始化UI
-        self.setup_ui()
-
-        # 连接信号
+        self.setup_ui()  # 连接信号
         self.connect_signals()
 
         # 检查管理员权限
@@ -648,6 +649,17 @@ class HostsMonitorUI(QMainWindow):
         # 监控状态变更信号
         self.monitor_status_changed.connect(self.update_monitor_button)
 
+        # 延迟导入controller以避免循环导入
+        try:
+            from .controller import controller as ctrl
+
+            global controller
+            # 如果controller为None则现在导入
+            if controller is None:
+                controller = ctrl
+        except ImportError as e:
+            logger.warning(f"无法加载控制器模块: {str(e)}，某些功能可能不可用")
+
     def check_admin_privileges(self) -> None:
         """检查管理员权限"""
         is_admin = self.is_admin()
@@ -820,15 +832,33 @@ class HostsMonitorUI(QMainWindow):
     def toggle_autostart(self, state: int) -> None:
         """切换开机自启状态"""
         # 导入工具函数
-        from .utils import set_autostart
+        try:
+            from .utils import set_autostart
+        except ImportError as e:
+            logger.error(f"导入set_autostart函数失败: {str(e)}")
+            QMessageBox.critical(self, "错误", "无法设置开机自启，缺少必要的函数支持")
+            # 在UI上回滚复选框状态但不退出程序
+            self.autostart_cb.blockSignals(True)  # 暂时阻止信号触发递归调用
+            self.autostart_cb.setChecked(not self.autostart_cb.isChecked())
+            self.autostart_cb.blockSignals(False)
+            return
 
         # 启用或禁用自启动
-        is_checked = state == Qt.CheckState.Checked.value
-        action_desc = "设置" if is_checked else "取消"
-
         try:
+            is_checked = state == Qt.CheckState.Checked.value
+            action_desc = "设置" if is_checked else "取消"
+
+            logger.info(f"正在{action_desc}开机自启...")
+
             # 使用工具函数设置自启动
-            if set_autostart(enable=is_checked):
+            result = False
+            try:
+                result = set_autostart(enable=is_checked)
+            except Exception as e:
+                logger.error(f"调用set_autostart函数时出错: {str(e)}")
+                raise
+
+            if result:
                 logger.info(f"已{action_desc}开机自启")
 
                 # 更新配置
@@ -836,15 +866,28 @@ class HostsMonitorUI(QMainWindow):
                 config.save_config()
             else:
                 # 设置失败，抛出异常统一处理
+                logger.warning(f"{action_desc}开机自启返回失败结果")
                 raise Exception(f"{action_desc}开机自启失败")
+
         except Exception as e:
             # 统一处理异常
             error_msg = f"{action_desc}开机自启失败: {str(e)}"
             logger.error(error_msg)
-            QMessageBox.critical(self, "错误", f"{action_desc}开机自启失败，请查看日志")
 
-            # 回滚复选框状态
-            self.autostart_cb.setChecked(not is_checked)
+            try:
+                QMessageBox.critical(
+                    self, "错误", f"{action_desc}开机自启失败，请查看日志"
+                )
+            except Exception as msg_ex:
+                logger.error(f"显示错误对话框失败: {str(msg_ex)}")
+
+            # 回滚复选框状态，使用阻塞信号防止递归触发
+            try:
+                self.autostart_cb.blockSignals(True)  # 暂时阻止信号触发递归调用
+                self.autostart_cb.setChecked(not is_checked)
+                self.autostart_cb.blockSignals(False)
+            except Exception as cb_ex:
+                logger.error(f"回滚复选框状态失败: {str(cb_ex)}")
 
     def open_hosts_file(self) -> None:
         """打开hosts文件"""

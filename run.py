@@ -10,6 +10,19 @@ import sys
 def safe_import():
     """安全导入主函数，处理可能的导入错误"""
     try:
+        # 先导入基础模块，避免循环导入
+        import hosts_monitor.logger
+        import hosts_monitor.config
+        import hosts_monitor.version
+        import hosts_monitor.monitor
+        import hosts_monitor.contrast
+        import hosts_monitor.repair
+
+        # 然后导入ui
+        import hosts_monitor.ui
+
+        # 最后导入controller和main
+        import hosts_monitor.controller
         from hosts_monitor.main import main
 
         return main

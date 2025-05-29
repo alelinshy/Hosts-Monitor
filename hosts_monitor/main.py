@@ -201,12 +201,12 @@ def main() -> int:
             from .utils import register_system_restart
 
             register_system_restart()
-            logger.info("已配置系统重启任务，下次开机将静默以管理员权限启动")
-
-    # 同步开机自启动状态，确保配置文件与系统实际状态一致
+            logger.info(
+                "已配置系统重启任务，下次开机将静默以管理员权限启动"
+            )  # 同步开机自启动状态，确保配置文件与系统实际状态一致
     from .utils import sync_autostart_state
 
-    sync_autostart_state()
+    sync_autostart_state(config)
 
     # 创建应用程序
     app = QApplication(sys.argv)
