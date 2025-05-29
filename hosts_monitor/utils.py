@@ -289,25 +289,22 @@ def create_admin_task(
 
         # 设置任务注册信息
         task_def.RegistrationInfo.Description = f"{APP_NAME} 管理员权限静默启动任务"
-        task_def.RegistrationInfo.Author = APP_NAME  # 创建登录触发器
-        try:
-            # 使用TASK_TRIGGER_LOGON(8)表示用户登录时
-            trigger = task_def.Triggers.Create(8)
-            # 对于某些Windows版本，默认登录用户可能不生效
-            # 在一个try块中尝试设置
-            try:
-                # 尝试设置为当前用户
-                # 这在某些系统上可能不支持，所以单独捕获此处可能的异常
-                trigger.UserId = getpass.getuser()
-            except:
-                logger.info("无法设置UserId属性，将使用默认登录用户")
+        # 创建登录触发器
+        task_def.RegistrationInfo.Author = APP_NAME
+        # 直接创建登录触发器，TASK_TRIGGER_LOGON(8)表示用户登录时
+        trigger = task_def.Triggers.Create(8)  # 明确设置仅在特定用户登录时触发
+        username = "ALEARNER\\Splrad"  # 直接指定用户账户
+        logger.info(f"设置触发器在用户 {username} 登录时启动，延迟5秒")
 
-            trigger.Enabled = True
+        # 设置触发用户和延迟时间
+        try:
+            trigger.UserId = username  # 指定用户
+            trigger.Delay = "PT5S"  # 设置延迟时间为5秒 (格式为ISO8601持续时间)
         except Exception as e:
-            # 如果登录触发器创建失败，尝试使用TASK_TRIGGER_REGISTRATION(7)替代
-            logger.warning(f"创建登录触发器失败: {str(e)}，尝试使用注册触发器")
-            trigger = task_def.Triggers.Create(7)  # TASK_TRIGGER_REGISTRATION
-            trigger.Enabled = True  # 创建执行动作
+            logger.info(f"设置触发器属性时出错: {str(e)}，将使用默认设置")
+
+        # 确保触发器启用
+        trigger.Enabled = True  # 创建执行动作
         action = task_def.Actions.Create(0)
         action.Path = python_exec
 
