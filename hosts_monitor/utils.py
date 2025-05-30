@@ -774,6 +774,17 @@ def check_autostart() -> bool:
     返回:
         bool: 是否已设置开机自启动
     """
+    # 先检查配置文件中的设置
+    from_config = False
+    try:
+        from .config import config
+
+        auto_start_config = config.get("general", "auto_start", False)
+        from_config = True
+    except Exception as e:
+        logger.error(f"读取配置文件中自启动设置失败: {str(e)}")
+        auto_start_config = False
+
     task_name = f"{APP_NAME}_AdminAutostart"
     shortcut_path = os.path.join(
         os.path.join(
@@ -786,10 +797,40 @@ def check_autostart() -> bool:
     has_task = task_exists(task_name)
     has_shortcut = os.path.exists(shortcut_path)
 
-    logger.info(f"自启动检查: 计划任务={has_task}, 快捷方式={has_shortcut}")
+    # 检查系统中的实际自启动状态
+    system_autostart = has_task or has_shortcut
 
-    # 任一存在则表示已设置自启动
-    return has_task or has_shortcut
+    logger.info(
+        f"自启动检查: 配置文件={auto_start_config}, 计划任务={has_task}, 快捷方式={has_shortcut}"
+    )
+
+    # 如果配置文件和系统状态不一致，同步它们
+    if from_config and auto_start_config != system_autostart:
+        logger.warning(
+            f"自启动状态不一致: 配置文件={auto_start_config}, 系统中实际状态={system_autostart}"
+        )
+        from .config import config
+
+        # 如果系统中实际有自启动但配置中没有，则更新配置
+        if system_autostart and not auto_start_config:
+            try:
+                config.set("general", "auto_start", True)
+                config.save_config()
+                logger.info("已更新配置文件中的自启动设置为True")
+                return True
+            except Exception as e:
+                logger.error(f"更新配置文件自启动设置失败: {str(e)}")
+        # 如果配置中有自启动但系统中没有，则尝试设置系统自启动
+        elif auto_start_config and not system_autostart:
+            try:
+                result = sync_autostart_state(config)
+                logger.info(f"已尝试同步系统自启动状态，结果: {result}")
+                return auto_start_config
+            except Exception as e:
+                logger.error(f"同步系统自启动状态失败: {str(e)}")
+
+    # 优先返回配置文件中的设置，确保UI界面与配置一致
+    return auto_start_config if from_config else system_autostart
 
 
 def set_autostart(enable: bool = True) -> bool:
