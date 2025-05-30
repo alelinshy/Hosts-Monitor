@@ -706,24 +706,62 @@ def sync_autostart_state(config):
         task_exists_flag = task_exists(task_name)
         shortcut_exists_flag = os.path.exists(shortcut_path)
 
+        # 增加调试日志
+        if task_exists_flag:
+            logger.info(f"检测到任务计划已存在: {task_name}")
+        else:
+            logger.info(f"未检测到任务计划: {task_name}")
+
+        # 检查各种可能的任务名称
+        task_names_to_check = [
+            f"{APP_NAME}_AdminAutostart",
+            f"{APP_NAME}_Autostart",
+            APP_NAME,
+        ]
+
+        for check_name in task_names_to_check:
+            if task_exists(check_name):
+                logger.info(f"发现任务计划: {check_name}")
+
         # 如果配置为不自启动，则移除所有自启动方式
         if not auto_start:
-            if task_exists_flag:
-                try:
-                    scheduler = get_task_service()
-                    if scheduler:
-                        root_folder = scheduler.GetFolder("\\")
-                        root_folder.DeleteTask(task_name, 0)
-                        logger.info(f"已删除计划任务: {task_name}")
-                except Exception as e:
-                    logger.error(f"删除计划任务失败: {str(e)}")
+            # 检查并删除所有相关的任务计划
+            for task_check_name in task_names_to_check:
+                if task_exists(task_check_name):
+                    # 先尝试通过API删除
+                    try:
+                        scheduler = get_task_service()
+                        if scheduler:
+                            root_folder = scheduler.GetFolder("\\")
+                            logger.info(f"正在尝试删除任务计划: {task_check_name}")
+                            root_folder.DeleteTask(task_check_name, 0)
+                            logger.info(f"已删除计划任务: {task_check_name}")
+                    except Exception as e:
+                        logger.error(
+                            f"通过任务接口删除计划任务 {task_check_name} 失败: {str(e)}"
+                        )
 
+                        # 通过force_delete_task函数强制删除
+                        logger.info(f"尝试使用强制删除方法删除任务: {task_check_name}")
+                        if force_delete_task(task_check_name):
+                            logger.info(f"已成功强制删除任务: {task_check_name}")
+                        else:
+                            logger.error(f"强制删除任务失败: {task_check_name}")
+
+            # 删除快捷方式
             if shortcut_exists_flag:
                 try:
                     os.remove(shortcut_path)
                     logger.info(f"已删除启动快捷方式: {shortcut_path}")
                 except Exception as e:
                     logger.error(f"删除快捷方式失败: {str(e)}")
+
+            # 再次检查任务是否已删除
+            for check_name in task_names_to_check:
+                if task_exists(check_name):
+                    logger.warning(f"任务删除失败，仍然存在: {check_name}")
+                else:
+                    logger.info(f"确认任务已删除: {check_name}")
 
             logger.info("已关闭所有自启动方式")
             return True
@@ -757,6 +795,10 @@ def sync_autostart_state(config):
                         logger.info(f"已删除计划任务: {task_name}")
                 except Exception as e:
                     logger.error(f"删除计划任务失败: {str(e)}")
+
+                    # 尝试强制删除
+                    if force_delete_task(task_name):
+                        logger.info(f"已成功强制删除任务: {task_name}")
 
             # 创建快捷方式
             return create_startup_shortcut(False)
@@ -872,4 +914,72 @@ def set_autostart(enable: bool = True) -> bool:
         import traceback
 
         logger.error(f"详细错误: {traceback.format_exc()}")
+        return False
+
+
+def force_delete_task(task_name):
+    """
+    使用命令行工具强制删除任务计划
+
+    参数:
+        task_name: 任务名称
+
+    返回:
+        bool: 是否成功删除
+    """
+    try:
+        import subprocess
+
+        # 检查任务是否存在
+        if not task_exists(task_name):
+            logger.info(f"任务 {task_name} 不存在，无需删除")
+            return True
+
+        # 使用schtasks命令删除任务
+        logger.info(f"正在使用命令行强制删除任务: {task_name}")
+        result = subprocess.run(
+            ["schtasks", "/delete", "/tn", task_name, "/f"],
+            shell=True,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        if result.returncode == 0:
+            logger.info(f"成功删除任务: {task_name}")
+            return True
+        else:
+            logger.error(f"删除任务 {task_name} 失败，返回码: {result.returncode}")
+            logger.error(f"错误信息: {result.stderr}")
+
+            # 尝试使用更高权限的命令删除
+            logger.info(f"尝试以管理员权限强制删除任务: {task_name}")
+            admin_result = subprocess.run(
+                [
+                    "powershell",
+                    "Start-Process",
+                    "schtasks",
+                    f'"/delete /tn \\"{task_name}\\" /f"',
+                    "-Verb",
+                    "RunAs",
+                    "-WindowStyle",
+                    "Hidden",
+                ],
+                shell=True,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            if admin_result.returncode == 0:
+                logger.info(f"使用管理员权限成功删除任务: {task_name}")
+                return True
+            else:
+                logger.error(
+                    f"管理员权限删除任务失败，返回码: {admin_result.returncode}"
+                )
+                logger.error(f"错误信息: {admin_result.stderr}")
+                return False
+    except Exception as e:
+        logger.error(f"强制删除任务时出错: {str(e)}")
         return False
