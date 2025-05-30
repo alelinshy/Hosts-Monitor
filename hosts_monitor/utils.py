@@ -131,12 +131,11 @@ def configure_autostart_and_privileges(config):
     elif is_admin_mode and auto_start:
         logger.info("配置为: 管理员权限，开机自启为开，使用任务计划实现静默自启动")
         # 使用任务计划实现静默自启动
-        return register_system_restart()
-
-    # 其他情况: 管理员权限，开机自启为关
+        return register_system_restart()  # 其他情况: 管理员权限，开机自启为关
     else:
-        logger.info("配置为: 管理员权限，开机自启为关，无需额外操作")
-        return True
+        logger.info("配置为: 管理员权限，开机自启为关，清理所有自启动设置")
+        # 调用sync_autostart_state确保清理所有自启动设置
+        return sync_autostart_state(config)
 
 
 def create_startup_shortcut(run_as_admin=False):
@@ -286,14 +285,13 @@ def create_admin_task(
 
         # 创建新任务定义
         task_def = scheduler.NewTask(0)
-
         # 设置任务注册信息
         task_def.RegistrationInfo.Description = f"{APP_NAME} 管理员权限静默启动任务"
-        # 创建登录触发器
         task_def.RegistrationInfo.Author = APP_NAME
-        # 直接创建登录触发器，TASK_TRIGGER_LOGON(8)表示用户登录时
-        trigger = task_def.Triggers.Create(8)  # 明确设置仅在特定用户登录时触发
-        username = "ALEARNER\\Splrad"  # 直接指定用户账户
+
+        # 创建登录触发器，TASK_TRIGGER_LOGON(9)表示用户登录时
+        trigger = task_def.Triggers.Create(9)  # 明确设置为用户登录触发器
+        username = getpass.getuser()  # 获取当前用户名
         logger.info(f"设置触发器在用户 {username} 登录时启动，延迟5秒")
 
         # 设置触发用户和延迟时间
@@ -304,7 +302,9 @@ def create_admin_task(
             logger.info(f"设置触发器属性时出错: {str(e)}，将使用默认设置")
 
         # 确保触发器启用
-        trigger.Enabled = True  # 创建执行动作
+        trigger.Enabled = True
+
+        # 创建执行动作
         action = task_def.Actions.Create(0)
         action.Path = python_exec
 
@@ -321,19 +321,30 @@ def create_admin_task(
 
         # 设置工作目录
         if script_path:
-            action.WorkingDirectory = os.path.dirname(script_path)  # 设置执行账户和权限
+            action.WorkingDirectory = os.path.dirname(script_path)
+
+        # 设置执行账户和权限
         username = getpass.getuser()  # 获取当前用户名
         task_def.Principal.UserId = username  # 使用当前用户
         task_def.Principal.LogonType = 3  # TASK_LOGON_INTERACTIVE_TOKEN
         task_def.Principal.RunLevel = 1  # TASK_RUNLEVEL_HIGHEST (管理员权限)
-
         # 设置其他任务选项
-        task_def.Settings.Enabled = True
+        task_def.Settings.Enabled = True  # 启用任务
         task_def.Settings.Hidden = False  # 可见任务，便于调试
-        task_def.Settings.StartWhenAvailable = True
-        task_def.Settings.DisallowStartIfOnBatteries = (
-            False  # 设置任务文件夹位置为程序目录
+        task_def.Settings.StartWhenAvailable = (
+            False  # 如果错过了触发时间，则在下次可用时启动
         )
+        task_def.Settings.DisallowStartIfOnBatteries = False  # 允许在电池供电时启动
+
+        # 设置任务执行时间限制（当前为默认的3天）
+        try:
+            # 将任务执行时间限制设为0，表示不限制运行时间（禁用超时停止）
+            task_def.Settings.ExecutionTimeLimit = "PT0S"
+            logger.info("已禁用任务超时限制")
+        except Exception as e:
+            logger.warning(f"设置任务超时限制失败: {str(e)}")
+
+        # 设置任务文件夹位置为程序目录
         task_folder_path = ""  # 根文件夹 (默认)
 
         # 尝试获取程序所在位置作为任务文件夹
@@ -805,7 +816,7 @@ def set_autostart(enable: bool = True) -> bool:
             f"正在{'启用' if enable else '禁用'}开机自启动，管理员权限={run_as_admin}"
         )
 
-        # 同步自启动状态到系统
+        # 同步自启动状态到系统 - 该函数会处理清理工作
         result = sync_autostart_state(config)
 
         if result:
